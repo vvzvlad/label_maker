@@ -528,27 +528,38 @@
           const cls = node.getClassName();
           if (cls === 'Text') {
             savedNodes.push({
-              type: 'text',
+              type:     'text',
               text:     node.text(),
               x:        node.x(),
               y:        node.y(),
+              rotation: node.rotation(),
+              scaleX:   node.scaleX(),
+              scaleY:   node.scaleY(),
               fontSize: node.fontSize(),
               fill:     node.fill(),
             });
           } else if (cls === 'Image') {
             savedNodes.push({
-              type: 'image',
-              x: node.x(),
-              y: node.y(),
-              width: node.width(),
-              height: node.height(),
-              src: node._srcDataUrl,
+              type:     'image',
+              x:        node.x(),
+              y:        node.y(),
+              rotation: node.rotation(),
+              scaleX:   node.scaleX(),
+              scaleY:   node.scaleY(),
+              width:    node.width(),
+              height:   node.height(),
+              src:      node._srcDataUrl,
             });
           } else if (cls === 'Line') {
             savedNodes.push({
-              type: 'line',
-              points: node.points().slice(),
-              stroke: node.stroke(),
+              type:        'line',
+              points:      node.points().slice(),
+              x:           node.x(),
+              y:           node.y(),
+              rotation:    node.rotation(),
+              scaleX:      node.scaleX(),
+              scaleY:      node.scaleY(),
+              stroke:      node.stroke(),
               strokeWidth: node.strokeWidth(),
             });
           }
@@ -844,16 +855,23 @@
     function restoreSavedNodes(nodes) {
       nodes.forEach(n => {
         if (n.type === 'text') {
-          addTextNodeWithProps(n.text, n.x, n.y, n.fontSize, n.fill);
+          const node = addTextNodeWithProps(n.text, n.x, n.y, n.fontSize, n.fill);
+          // Restore transform attributes that Transformer may have applied
+          if (n.rotation) node.rotation(n.rotation);
+          if (n.scaleX   !== undefined) node.scaleX(n.scaleX);
+          if (n.scaleY   !== undefined) node.scaleY(n.scaleY);
         } else if (n.type === 'image' && n.src) {
           const imgEl = new Image();
           imgEl.onload = () => {
             const kImg = new Konva.Image({
-              image: imgEl,
-              x: n.x,
-              y: n.y,
-              width: n.width,
-              height: n.height,
+              image:    imgEl,
+              x:        n.x,
+              y:        n.y,
+              width:    n.width,
+              height:   n.height,
+              rotation: n.rotation || 0,
+              scaleX:   n.scaleX   !== undefined ? n.scaleX : 1,
+              scaleY:   n.scaleY   !== undefined ? n.scaleY : 1,
               draggable: true,
             });
             kImg._srcDataUrl = n.src;
@@ -877,11 +895,16 @@
           imgEl.src = n.src;
         } else if (n.type === 'line') {
           const line = new Konva.Line({
-            points: n.points,
-            stroke: n.stroke || '#000000',
+            points:      n.points,
+            x:           n.x           || 0,
+            y:           n.y           || 0,
+            rotation:    n.rotation    || 0,
+            scaleX:      n.scaleX      !== undefined ? n.scaleX : 1,
+            scaleY:      n.scaleY      !== undefined ? n.scaleY : 1,
+            stroke:      n.stroke      || '#000000',
             strokeWidth: n.strokeWidth || 2,
-            lineCap: 'round',
-            draggable: true,
+            lineCap:     'round',
+            draggable:   true,
             hitStrokeWidth: 20, // wider hit area so thin lines are easy to click
           });
           layer.add(line);
@@ -910,27 +933,38 @@
         if (cls === 'Rect' || cls === 'Transformer') return;
         if (cls === 'Text') {
           nodes.push({
-            type: 'text',
-            text: node.text(),
-            x: node.x(),
-            y: node.y(),
+            type:     'text',
+            text:     node.text(),
+            x:        node.x(),
+            y:        node.y(),
+            rotation: node.rotation(),
+            scaleX:   node.scaleX(),
+            scaleY:   node.scaleY(),
             fontSize: node.fontSize(),
-            fill: node.fill(),
+            fill:     node.fill(),
           });
         } else if (cls === 'Image') {
           nodes.push({
-            type: 'image',
-            x: node.x(),
-            y: node.y(),
-            width: node.width(),
-            height: node.height(),
-            src: node._srcDataUrl,
+            type:     'image',
+            x:        node.x(),
+            y:        node.y(),
+            rotation: node.rotation(),
+            scaleX:   node.scaleX(),
+            scaleY:   node.scaleY(),
+            width:    node.width(),
+            height:   node.height(),
+            src:      node._srcDataUrl,
           });
         } else if (cls === 'Line') {
           nodes.push({
-            type: 'line',
-            points: node.points().slice(),
-            stroke: node.stroke(),
+            type:        'line',
+            points:      node.points().slice(),
+            x:           node.x(),
+            y:           node.y(),
+            rotation:    node.rotation(),
+            scaleX:      node.scaleX(),
+            scaleY:      node.scaleY(),
+            stroke:      node.stroke(),
             strokeWidth: node.strokeWidth(),
           });
         }
