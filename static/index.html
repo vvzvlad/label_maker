@@ -586,8 +586,10 @@
       layer.add(bgRect);
 
       // Shared transformer for selection handles
+      // anchorSize is kept small (5px) so anchor hit areas do not overlap thin elements like lines
       transformer = new Konva.Transformer({
         enabledAnchors: ['top-left', 'top-right', 'bottom-left', 'bottom-right'],
+        anchorSize: 5,
         boundBoxFunc: (oldBox, newBox) => newBox,
       });
       layer.add(transformer);
@@ -1018,10 +1020,10 @@
       lines.forEach((labelLine, idx) => {
         if (idx > 0) doc.addPage([widthMm, heightMm], orientation);
 
-        // Substitute placeholders
+        // Substitute placeholders; convert literal \n sequences to real newlines
         textNodes.forEach((node, ni) => {
           if (placeholderRe.test(originalTexts[ni])) {
-            node.text(labelLine);
+            node.text(labelLine.replace(/\\n/g, '\n'));
           }
         });
 
@@ -1063,9 +1065,9 @@
       transformer.nodes([]);
 
       lines.forEach((labelLine) => {
-        // Substitute placeholders
+        // Substitute placeholders; convert literal \n sequences to real newlines
         textNodes.forEach((node, ni) => {
-          if (placeholderRe.test(originalTexts[ni])) node.text(labelLine);
+          if (placeholderRe.test(originalTexts[ni])) node.text(labelLine.replace(/\\n/g, '\n'));
         });
         layer.batchDraw();
 
