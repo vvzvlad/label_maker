@@ -66,8 +66,8 @@
 
     /* ── Left sidebar ── */
     .sidebar {
-      width: 380px;
-      min-width: 380px;
+      width: 760px;
+      min-width: 760px;
       background: #1e1e1e;
       border-right: 1px solid #2a2a2a;
       padding: 20px 18px;
@@ -128,24 +128,31 @@
     }
     .entities-table td {
       border-color: #333;
-      padding: 1px 2px;
+      padding: 0;
       background: #252525;
       vertical-align: middle;
     }
+    .entities-table td.text-center {
+      padding: 1px 2px;
+    }
     .entities-table .entity-input {
-      background: #252525;
-      border-color: #333;
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      box-shadow: none !important;
       color: #e0e0e0;
       font-size: 0.75rem;
-      padding: 1px 4px !important;
+      padding: 2px 6px !important;
       height: auto;
       min-width: 0;
+      width: 100%;
+      outline: none;
     }
     .entities-table .entity-input:focus {
-      background: #2a2a2a;
-      border-color: #5A9A4A;
-      color: #e0e0e0;
-      box-shadow: 0 0 0 0.12rem rgba(90,154,74,0.25);
+      background: rgba(90,154,74,0.08);
+      border: none;
+      box-shadow: none !important;
+      outline: none;
     }
     .entities-table .btn-delete-row {
       padding: 0.12rem 0.35rem;
@@ -320,6 +327,9 @@
         <button id="btn-add-entity-row" type="button" class="btn btn-outline-secondary btn-sm mt-2">
           <i class="bi bi-plus-lg me-1"></i>Add row
         </button>
+        <button id="btn-clear-table" type="button" class="btn btn-outline-danger btn-sm mt-2">
+          <i class="bi bi-x-circle me-1"></i>Clear Table
+        </button>
       </div>
 
       <!-- Generate PDF button -->
@@ -357,6 +367,9 @@
           <input type="file" id="img-upload" accept="image/*" style="display:none" onchange="addImageNode(this)" />
           <button class="btn btn-outline-secondary btn-sm" onclick="addLineNode()">
             <i class="bi bi-slash-lg me-1"></i>Add Line
+          </button>
+          <button id="btn-reset-template" class="btn btn-outline-danger btn-sm" type="button">
+            <i class="bi bi-arrow-counterclockwise me-1"></i>Reset Template
           </button>
           <select id="input-zoom" class="form-select form-select-sm" style="width:80px;" onchange="applyZoom()">
             <option value="25">25%</option>
@@ -612,6 +625,7 @@
         tr.remove();
         updateCounter();
         schedulePreviewUpdate();
+        autoSaveTable();
       });
 
       return tr;
@@ -631,6 +645,21 @@
         }
       });
       return rows;
+    }
+
+    /** Persist all entity table rows to localStorage, including empty rows. */
+    function autoSaveTable() {
+      const tbody = document.getElementById('entities-tbody');
+      const rows = [];
+      tbody.querySelectorAll('tr').forEach((tr) => {
+        const inputs = tr.querySelectorAll('input.entity-input');
+        rows.push({
+          entity1: inputs[0]?.value || '',
+          entity2: inputs[1]?.value || '',
+          entity3: inputs[2]?.value || '',
+        });
+      });
+      localStorage.setItem('lm_table', JSON.stringify(rows));
     }
 
     /** Update the label count display. */
@@ -685,6 +714,7 @@
               scaleY:   node.scaleY(),
               fontSize: node.fontSize(),
               fill:     node.fill(),
+              width:    node.width(),
             });
           } else if (cls === 'Image') {
             savedNodes.push({
@@ -776,13 +806,15 @@
     /**
      * Create and register a Konva.Text node with interaction handlers.
      */
-    function addTextNodeWithProps(text, x, y, fontSize, fill) {
+    function addTextNodeWithProps(text, x, y, fontSize, fill, width = 200) {
       const textNode = new Konva.Text({
         text:      text,
         x:         x,
         y:         y,
         fontSize:  fontSize,
         fill:      fill || '#000000',
+        width:     width,
+        wrap:      'word',
         draggable: true,
       });
 
@@ -809,6 +841,18 @@
       });
 
       textNode.on('dragend', schedulePreviewUpdate);
+
+      // Convert Transformer scaling into text box width changes.
+      // Font size remains controlled only via the context menu.
+      textNode.on('transform', () => {
+        textNode.setAttrs({
+          width: Math.max(20, textNode.width() * textNode.scaleX()),
+          scaleX: 1,
+          scaleY: 1,
+        });
+        layer.batchDraw();
+      });
+      textNode.on('transformend', schedulePreviewUpdate);
 
       layer.batchDraw();
       return textNode;
@@ -1011,7 +1055,7 @@
     function restoreSavedNodes(nodes) {
       nodes.forEach(n => {
         if (n.type === 'text') {
-          const node = addTextNodeWithProps(n.text, n.x, n.y, n.fontSize, n.fill);
+          const node = addTextNodeWithProps(n.text, n.x, n.y, n.fontSize, n.fill, n.width);
           // Restore transform attributes that Transformer may have applied
           if (n.rotation) node.rotation(n.rotation);
           if (n.scaleX   !== undefined) node.scaleX(n.scaleX);
@@ -1102,6 +1146,7 @@
             scaleY:   node.scaleY(),
             fontSize: node.fontSize(),
             fill:     node.fill(),
+            width:    node.width(),
           });
         } else if (cls === 'Image') {
           nodes.push({
@@ -1143,6 +1188,63 @@
       a.download = 'template.json';
       a.click();
       URL.revokeObjectURL(url);
+    }
+
+    /** Persist current template to localStorage. */
+    function autoSaveTemplate() {
+      if (!layer) return;
+
+      const nodes = [];
+      layer.getChildren().forEach(node => {
+        const cls = node.getClassName();
+        if (cls === 'Rect' || cls === 'Transformer') return;
+        if (cls === 'Text') {
+          nodes.push({
+            type:     'text',
+            text:     node.text(),
+            x:        node.x(),
+            y:        node.y(),
+            rotation: node.rotation(),
+            scaleX:   node.scaleX(),
+            scaleY:   node.scaleY(),
+            fontSize: node.fontSize(),
+            fill:     node.fill(),
+            width:    node.width(),
+          });
+        } else if (cls === 'Image') {
+          nodes.push({
+            type:     'image',
+            x:        node.x(),
+            y:        node.y(),
+            rotation: node.rotation(),
+            scaleX:   node.scaleX(),
+            scaleY:   node.scaleY(),
+            width:    node.width(),
+            height:   node.height(),
+            src:      node._srcDataUrl,
+          });
+        } else if (cls === 'Line') {
+          nodes.push({
+            type:        'line',
+            points:      node.points().slice(),
+            x:           node.x(),
+            y:           node.y(),
+            rotation:    node.rotation(),
+            scaleX:      node.scaleX(),
+            scaleY:      node.scaleY(),
+            stroke:      node.stroke(),
+            strokeWidth: node.strokeWidth(),
+          });
+        }
+      });
+
+      const tpl = {
+        version: 1,
+        widthMm: parseFloat(inputWidth.value) || 58,
+        heightMm: parseFloat(inputHeight.value) || 40,
+        nodes,
+      };
+      localStorage.setItem('lm_template', JSON.stringify(tpl));
     }
 
     function loadTemplate(input) {
@@ -1217,9 +1319,9 @@
         // Substitute ENTITY placeholders; convert literal \n sequences to real newlines
         textNodes.forEach((node, ni) => {
           let t = originalTexts[ni];
-          t = t.replace(/%%ENTITY1%%/g, row.entity1.replace(/\\n/g, '\n'));
-          t = t.replace(/%%ENTITY2%%/g, row.entity2.replace(/\\n/g, '\n'));
-          t = t.replace(/%%ENTITY3%%/g, row.entity3.replace(/\\n/g, '\n'));
+          t = t.replace(/%E1%/g, row.entity1.replace(/\\n/g, '\n'));
+          t = t.replace(/%E2%/g, row.entity2.replace(/\\n/g, '\n'));
+          t = t.replace(/%E3%/g, row.entity3.replace(/\\n/g, '\n'));
           node.text(t);
         });
 
@@ -1246,6 +1348,8 @@
     }
 
     function renderPreviewStrip() {
+      autoSaveTemplate();
+
       const rows = getRows();
       const strip = document.getElementById('preview-strip');
       strip.innerHTML = '';
@@ -1270,9 +1374,9 @@
         // Substitute ENTITY placeholders; convert literal \n sequences to real newlines
         textNodes.forEach((node, ni) => {
           let t = originalTexts[ni];
-          t = t.replace(/%%ENTITY1%%/g, row.entity1.replace(/\\n/g, '\n'));
-          t = t.replace(/%%ENTITY2%%/g, row.entity2.replace(/\\n/g, '\n'));
-          t = t.replace(/%%ENTITY3%%/g, row.entity3.replace(/\\n/g, '\n'));
+          t = t.replace(/%E1%/g, row.entity1.replace(/\\n/g, '\n'));
+          t = t.replace(/%E2%/g, row.entity2.replace(/\\n/g, '\n'));
+          t = t.replace(/%E3%/g, row.entity3.replace(/\\n/g, '\n'));
           node.text(t);
         });
         layer.batchDraw();
@@ -1317,6 +1421,7 @@
     document.getElementById('entities-tbody').addEventListener('input', () => {
       updateCounter();
       schedulePreviewUpdate();
+      autoSaveTable();
     });
 
     document.getElementById('entities-tbody').addEventListener('paste', (e) => {
@@ -1357,12 +1462,32 @@
 
       updateCounter();
       schedulePreviewUpdate();
+      autoSaveTable();
     });
 
     document.getElementById('btn-add-entity-row').addEventListener('click', () => {
       addEntityRow();
       updateCounter();
       schedulePreviewUpdate();
+      autoSaveTable();
+    });
+
+    document.getElementById('btn-clear-table').addEventListener('click', () => {
+      const tbody = document.getElementById('entities-tbody');
+      tbody.innerHTML = '';
+      addEntityRow();
+      updateCounter();
+      schedulePreviewUpdate();
+      localStorage.removeItem('lm_table');
+    });
+
+    document.getElementById('btn-reset-template').addEventListener('click', () => {
+      initStage(false);
+      addTextNodeWithProps('%E1%', 10, 10, DEFAULT_FONT_SIZE, '#000000');
+      transformer.nodes([]);
+      layer.batchDraw();
+      schedulePreviewUpdate();
+      localStorage.removeItem('lm_template');
     });
 
     inputWidth.addEventListener('input',  handleDimensionChange);
@@ -1370,14 +1495,54 @@
 
     // ── Initialise ───────────────────────────────────────────────────
 
-    initStage();
-    addEntityRow();
-    updateCounter();
+    try {
+      const savedTableRaw = localStorage.getItem('lm_table');
+      if (savedTableRaw) {
+        const savedTable = JSON.parse(savedTableRaw);
+        if (Array.isArray(savedTable) && savedTable.length > 0) {
+          savedTable.forEach((r) => {
+            addEntityRow(r?.entity1 || '', r?.entity2 || '', r?.entity3 || '');
+          });
+        } else {
+          addEntityRow();
+        }
+      } else {
+        addEntityRow();
+      }
+    } catch {
+      addEntityRow();
+    }
 
-    // Add a default placeholder text node so users see an example
-    addTextNodeWithProps('%%ENTITY1%%', 10, 10, DEFAULT_FONT_SIZE, '#000000');
-    transformer.nodes([]);
-    layer.batchDraw();
+    try {
+      const savedTemplateRaw = localStorage.getItem('lm_template');
+      if (savedTemplateRaw) {
+        const tpl = JSON.parse(savedTemplateRaw);
+        if (tpl.widthMm) inputWidth.value = tpl.widthMm;
+        if (tpl.heightMm) inputHeight.value = tpl.heightMm;
+
+        initStage(false);
+        if (Array.isArray(tpl.nodes)) {
+          restoreSavedNodes(tpl.nodes);
+        }
+
+        transformer.nodes([]);
+        layer.batchDraw();
+      } else {
+        initStage();
+        // Add a default placeholder text node so users see an example
+        addTextNodeWithProps('%E1%', 10, 10, DEFAULT_FONT_SIZE, '#000000');
+        transformer.nodes([]);
+        layer.batchDraw();
+      }
+    } catch {
+      initStage();
+      // Add a default placeholder text node so users see an example
+      addTextNodeWithProps('%E1%', 10, 10, DEFAULT_FONT_SIZE, '#000000');
+      transformer.nodes([]);
+      layer.batchDraw();
+    }
+
+    updateCounter();
     schedulePreviewUpdate();
   </script>
 </body>
