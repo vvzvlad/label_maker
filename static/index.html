@@ -169,30 +169,22 @@
       border-radius: 4px;
       overflow: auto;
       min-height: 0;
-      position: relative;
-      padding: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    #zoom-spacer {
+      flex-shrink: 0;
     }
     #konva-scale-wrap {
-      position: absolute;
-      top: 16px;
-      left: 16px;
       transform-origin: top left;
+      flex-shrink: 0;
     }
     #konva-container {
       /* Sized dynamically to match label pixel dimensions */
     }
 
-    .preview-section {
-      flex-shrink: 0;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-    .preview-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
     #preview-strip {
       display: none;
       flex-direction: row;
@@ -203,6 +195,7 @@
       border-radius: 4px;
       min-height: 120px;
       align-items: flex-start;
+      flex-shrink: 0;
     }
     .preview-thumb {
       display: flex;
@@ -276,14 +269,24 @@
         ></textarea>
       </div>
 
-      <!-- Generate / Clear buttons -->
-      <div class="d-flex gap-2">
+      <!-- Generate / Preview / PDF buttons row -->
+      <div class="d-flex gap-2 flex-wrap">
         <button id="btn-generate" class="btn btn-generate flex-fill" onclick="generatePDF()">
           <i class="bi bi-file-earmark-pdf me-1"></i> Generate PDF
         </button>
-        <button class="btn btn-outline-secondary" onclick="clearLabels()">
-          <i class="bi bi-x-lg me-1"></i> Clear
+        <button class="btn btn-outline-secondary" onclick="renderPreviewStrip()">
+          <i class="bi bi-eye me-1"></i> Preview
         </button>
+      </div>
+
+      <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary btn-sm flex-fill" onclick="saveTemplate()">
+          <i class="bi bi-download me-1"></i> Save Template
+        </button>
+        <button class="btn btn-outline-secondary btn-sm flex-fill" onclick="document.getElementById('tpl-upload').click()">
+          <i class="bi bi-upload me-1"></i> Load Template
+        </button>
+        <input type="file" id="tpl-upload" accept=".json,application/json" style="display:none" onchange="loadTemplate(this)" />
       </div>
 
       <!-- Counter -->
@@ -300,8 +303,12 @@
           <button id="btn-add-text" class="btn btn-outline-secondary btn-sm" onclick="addTextNode()">
             <i class="bi bi-plus-lg me-1"></i>Add Text
           </button>
-          <button id="btn-delete-selected" class="btn btn-outline-danger btn-sm" onclick="deleteSelected()">
-            <i class="bi bi-trash me-1"></i>Delete
+          <button class="btn btn-outline-secondary btn-sm" onclick="document.getElementById('img-upload').click()">
+            <i class="bi bi-image me-1"></i>Add Image
+          </button>
+          <input type="file" id="img-upload" accept="image/*" style="display:none" onchange="addImageNode(this)" />
+          <button class="btn btn-outline-secondary btn-sm" onclick="addLineNode()">
+            <i class="bi bi-slash-lg me-1"></i>Add Line
           </button>
           <select id="input-zoom" class="form-select form-select-sm" style="width:80px;" onchange="applyZoom()">
             <option value="50">50%</option>
@@ -314,28 +321,46 @@
       </div>
 
       <div id="konva-stage-wrap">
-        <div id="zoom-spacer" style="position:relative;">
+        <div id="zoom-spacer">
           <div id="konva-scale-wrap">
             <div id="konva-container"></div>
           </div>
         </div>
       </div>
 
-      <div class="preview-section">
-        <div class="preview-header">
-          <div class="section-header" style="margin:0;">Label Previews</div>
-          <button class="btn btn-outline-secondary btn-sm" onclick="renderPreviewStrip()">
-            <i class="bi bi-eye me-1"></i>Preview
-          </button>
-        </div>
-        <div id="preview-strip"></div>
-      </div>
+      <div id="preview-strip"></div>
     </div>
 
   </div>
 
   <!-- Toast container -->
   <div class="toast-container" id="toast-container"></div>
+
+  <!-- Right-click context menu for canvas elements -->
+  <div id="ctx-menu" style="
+    display:none; position:fixed; z-index:20000;
+    background:#1e1e1e; border:1px solid #333; border-radius:4px;
+    min-width:160px; box-shadow:0 4px 12px rgba(0,0,0,0.5);
+    padding:4px 0; font-size:0.85rem;">
+    <div id="ctx-delete" style="padding:6px 14px; cursor:pointer; color:#ff6b6b;">
+      <i class="bi bi-trash me-2"></i>Delete
+    </div>
+    <div style="border-top:1px solid #333; margin:4px 0;"></div>
+    <div data-fontsize-row="" style="padding:6px 14px; color:#bbb; font-size:0.75rem; user-select:none;">Font size (px)</div>
+    <div data-fontsize-row="" style="padding:2px 14px 8px;">
+      <input id="ctx-fontsize" type="number" min="4" max="200" step="1"
+        class="form-control form-control-sm"
+        style="background:#252525; border-color:#333; color:#e0e0e0; width:80px;"
+      />
+    </div>
+    <div data-stroke-row="" style="padding:2px 14px 8px;">
+      <label style="font-size:0.75rem; color:#bbb;">Stroke width (px)</label>
+      <input id="ctx-strokewidth" type="number" min="1" max="20" step="1"
+        class="form-control form-control-sm"
+        style="background:#252525; border-color:#333; color:#e0e0e0; width:80px;"
+      />
+    </div>
+  </div>
 
   <!-- Bootstrap JS -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
@@ -355,6 +380,92 @@
     let layer       = null;
     let transformer = null;
     let bgRect      = null;
+    let previewTimer = null;
+
+    function schedulePreviewUpdate() {
+      clearTimeout(previewTimer);
+      previewTimer = setTimeout(renderPreviewStrip, 400);
+    }
+
+    // ── Context menu ─────────────────────────────────────────────
+    const ctxMenu       = document.getElementById('ctx-menu');
+    const ctxDelete     = document.getElementById('ctx-delete');
+    const ctxFontInput  = document.getElementById('ctx-fontsize');
+    const ctxStrokeInput = document.getElementById('ctx-strokewidth');
+    let ctxTarget       = null;
+
+    /** Show context menu near the given screen position for the given node. */
+    function showContextMenu(x, y, node) {
+      ctxTarget = node;
+      const cls = node.getClassName();
+
+      ctxFontInput.value = cls === 'Text' ? node.fontSize() : '';
+      ctxStrokeInput.value = cls === 'Line' ? node.strokeWidth() : '';
+
+      // Show menu, then reposition to stay within viewport
+      ctxMenu.style.display = 'block';
+      const mw = ctxMenu.offsetWidth;
+      const mh = ctxMenu.offsetHeight;
+      ctxMenu.style.left = (x + mw > window.innerWidth ? x - mw : x) + 'px';
+      ctxMenu.style.top = (y + mh > window.innerHeight ? y - mh : y) + 'px';
+
+      const hasFontSize = cls === 'Text';
+      const hasStrokeWidth = cls === 'Line';
+      ctxMenu.querySelectorAll('[data-fontsize-row]').forEach(el => {
+        el.style.display = hasFontSize ? '' : 'none';
+      });
+      ctxMenu.querySelectorAll('[data-stroke-row]').forEach(el => {
+        el.style.display = hasStrokeWidth ? '' : 'none';
+      });
+    }
+
+    function hideContextMenu() {
+      ctxMenu.style.display = 'none';
+      ctxTarget = null;
+    }
+
+    // Delete action
+    ctxDelete.addEventListener('click', () => {
+      if (ctxTarget) {
+        ctxTarget.destroy();
+        transformer.nodes([]);
+        layer.batchDraw();
+        schedulePreviewUpdate();
+      }
+      hideContextMenu();
+    });
+
+    // Font size change — apply live on input
+    ctxFontInput.addEventListener('input', () => {
+      if (ctxTarget && ctxTarget.getClassName() === 'Text') {
+        const fs = parseInt(ctxFontInput.value, 10);
+        if (fs > 0) {
+          ctxTarget.fontSize(fs);
+          layer.batchDraw();
+        }
+      }
+    });
+    ctxFontInput.addEventListener('change', () => schedulePreviewUpdate());
+
+    // Stroke width change — apply live on input
+    ctxStrokeInput.addEventListener('input', () => {
+      if (ctxTarget && ctxTarget.getClassName() === 'Line') {
+        const sw = parseInt(ctxStrokeInput.value, 10);
+        if (sw > 0) {
+          ctxTarget.strokeWidth(sw);
+          layer.batchDraw();
+        }
+      }
+    });
+    ctxStrokeInput.addEventListener('change', () => schedulePreviewUpdate());
+
+    // Hide on outside click or Escape
+    document.addEventListener('click', (e) => {
+      if (!ctxMenu.contains(e.target)) hideContextMenu();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') hideContextMenu();
+    });
 
     function applyZoom() {
       const zoom = parseInt(document.getElementById('input-zoom').value, 10) / 100;
@@ -404,23 +515,41 @@
      * Initialize (or reinitialize) the Konva stage with the current mm dimensions.
      * Existing text nodes are preserved when re-creating the stage.
      */
-    function initStage() {
+    function initStage(preserveNodes = true) {
       const widthMm  = parseFloat(inputWidth.value)  || 58;
       const heightMm = parseFloat(inputHeight.value) || 40;
       const stageW   = Math.round(widthMm  * PX_PER_MM);
       const stageH   = Math.round(heightMm * PX_PER_MM);
 
-      // Collect existing text nodes before destroying stage
+      // Collect existing nodes before destroying stage
       const savedNodes = [];
-      if (layer) {
+      if (preserveNodes && layer) {
         layer.getChildren().forEach(node => {
-          if (node.getClassName() === 'Text') {
+          const cls = node.getClassName();
+          if (cls === 'Text') {
             savedNodes.push({
+              type: 'text',
               text:     node.text(),
               x:        node.x(),
               y:        node.y(),
               fontSize: node.fontSize(),
               fill:     node.fill(),
+            });
+          } else if (cls === 'Image') {
+            savedNodes.push({
+              type: 'image',
+              x: node.x(),
+              y: node.y(),
+              width: node.width(),
+              height: node.height(),
+              src: node._srcDataUrl,
+            });
+          } else if (cls === 'Line') {
+            savedNodes.push({
+              type: 'line',
+              points: node.points().slice(),
+              stroke: node.stroke(),
+              strokeWidth: node.strokeWidth(),
             });
           }
         });
@@ -463,12 +592,13 @@
       });
       layer.add(transformer);
 
-      // Restore previously saved text nodes
-      savedNodes.forEach(n => addTextNodeWithProps(n.text, n.x, n.y, n.fontSize, n.fill));
+      // Restore previously saved nodes
+      restoreSavedNodes(savedNodes);
 
       // Deselect when clicking on empty stage area
       stage.on('click tap', (e) => {
         if (e.target === stage || e.target === bgRect) {
+          hideContextMenu();
           transformer.nodes([]);
           layer.batchDraw();
         }
@@ -506,6 +636,16 @@
       textNode.on('dblclick dbltap', () => {
         startTextEdit(textNode);
       });
+
+      // Right-click → context menu
+      textNode.on('contextmenu', (e) => {
+        e.evt.preventDefault();
+        transformer.nodes([textNode]);
+        layer.batchDraw();
+        showContextMenu(e.evt.clientX, e.evt.clientY, textNode);
+      });
+
+      textNode.on('dragend', schedulePreviewUpdate);
 
       layer.batchDraw();
       return textNode;
@@ -551,7 +691,7 @@
       textarea.style.resize     = 'none';
       textarea.style.overflow   = 'hidden';
       textarea.style.zIndex     = '10000';
-      textarea.style.whiteSpace = 'nowrap';
+      textarea.style.whiteSpace = 'pre-wrap';
 
       // Auto-size textarea width/height to content
       function resize() {
@@ -577,6 +717,7 @@
         textNode.show();
         transformer.nodes([textNode]);
         layer.batchDraw();
+        schedulePreviewUpdate();
         textarea.remove();
       }
 
@@ -610,18 +751,227 @@
       // Select the newly created node
       transformer.nodes([node]);
       layer.batchDraw();
+      schedulePreviewUpdate();
     }
 
-    /** Delete the currently selected text node. */
-    function deleteSelected() {
-      const nodes = transformer.nodes();
-      if (nodes.length === 0) {
-        showToast('No element selected. Click a text element to select it first.', 'warning');
-        return;
-      }
-      nodes.forEach(n => n.destroy());
-      transformer.nodes([]);
+    function addImageNode(input) {
+      const file = input.files[0];
+      if (!file) return;
+      input.value = '';
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const imgEl = new Image();
+        imgEl.onload = () => {
+          const maxW = stage.width() * 0.8;
+          const maxH = stage.height() * 0.8;
+          let w = imgEl.width;
+          let h = imgEl.height;
+          if (w > maxW) {
+            h = h * maxW / w;
+            w = maxW;
+          }
+          if (h > maxH) {
+            w = w * maxH / h;
+            h = maxH;
+          }
+
+          const kImg = new Konva.Image({
+            image: imgEl,
+            x: (stage.width() - w) / 2,
+            y: (stage.height() - h) / 2,
+            width: w,
+            height: h,
+            draggable: true,
+          });
+          kImg._srcDataUrl = e.target.result;
+          layer.add(kImg);
+
+          kImg.on('click tap', (ev) => {
+            ev.cancelBubble = true;
+            transformer.nodes([kImg]);
+            layer.batchDraw();
+          });
+          kImg.on('contextmenu', (ev) => {
+            ev.evt.preventDefault();
+            transformer.nodes([kImg]);
+            layer.batchDraw();
+            showContextMenu(ev.evt.clientX, ev.evt.clientY, kImg);
+          });
+          kImg.on('dragend', schedulePreviewUpdate);
+
+          transformer.nodes([kImg]);
+          layer.batchDraw();
+          schedulePreviewUpdate();
+        };
+        imgEl.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function addLineNode() {
+      const cx = stage.width() / 2;
+      const cy = stage.height() / 2;
+      const line = new Konva.Line({
+        points: [cx - 40, cy, cx + 40, cy],
+        stroke: '#000000',
+        strokeWidth: 2,
+        lineCap: 'round',
+        draggable: true,
+      });
+      layer.add(line);
+
+      line.on('click tap', (e) => {
+        e.cancelBubble = true;
+        transformer.nodes([line]);
+        layer.batchDraw();
+      });
+      line.on('contextmenu', (e) => {
+        e.evt.preventDefault();
+        transformer.nodes([line]);
+        layer.batchDraw();
+        showContextMenu(e.evt.clientX, e.evt.clientY, line);
+      });
+      line.on('dragend', schedulePreviewUpdate);
+
+      transformer.nodes([line]);
       layer.batchDraw();
+      schedulePreviewUpdate();
+    }
+
+    function restoreSavedNodes(nodes) {
+      nodes.forEach(n => {
+        if (n.type === 'text') {
+          addTextNodeWithProps(n.text, n.x, n.y, n.fontSize, n.fill);
+        } else if (n.type === 'image' && n.src) {
+          const imgEl = new Image();
+          imgEl.onload = () => {
+            const kImg = new Konva.Image({
+              image: imgEl,
+              x: n.x,
+              y: n.y,
+              width: n.width,
+              height: n.height,
+              draggable: true,
+            });
+            kImg._srcDataUrl = n.src;
+            layer.add(kImg);
+
+            kImg.on('click tap', (e) => {
+              e.cancelBubble = true;
+              transformer.nodes([kImg]);
+              layer.batchDraw();
+            });
+            kImg.on('contextmenu', (e) => {
+              e.evt.preventDefault();
+              transformer.nodes([kImg]);
+              layer.batchDraw();
+              showContextMenu(e.evt.clientX, e.evt.clientY, kImg);
+            });
+            kImg.on('dragend', schedulePreviewUpdate);
+            layer.batchDraw();
+            schedulePreviewUpdate();
+          };
+          imgEl.src = n.src;
+        } else if (n.type === 'line') {
+          const line = new Konva.Line({
+            points: n.points,
+            stroke: n.stroke || '#000000',
+            strokeWidth: n.strokeWidth || 2,
+            lineCap: 'round',
+            draggable: true,
+          });
+          layer.add(line);
+
+          line.on('click tap', (e) => {
+            e.cancelBubble = true;
+            transformer.nodes([line]);
+            layer.batchDraw();
+          });
+          line.on('contextmenu', (e) => {
+            e.evt.preventDefault();
+            transformer.nodes([line]);
+            layer.batchDraw();
+            showContextMenu(e.evt.clientX, e.evt.clientY, line);
+          });
+          line.on('dragend', schedulePreviewUpdate);
+          layer.batchDraw();
+        }
+      });
+    }
+
+    function saveTemplate() {
+      const nodes = [];
+      layer.getChildren().forEach(node => {
+        const cls = node.getClassName();
+        if (cls === 'Rect' || cls === 'Transformer') return;
+        if (cls === 'Text') {
+          nodes.push({
+            type: 'text',
+            text: node.text(),
+            x: node.x(),
+            y: node.y(),
+            fontSize: node.fontSize(),
+            fill: node.fill(),
+          });
+        } else if (cls === 'Image') {
+          nodes.push({
+            type: 'image',
+            x: node.x(),
+            y: node.y(),
+            width: node.width(),
+            height: node.height(),
+            src: node._srcDataUrl,
+          });
+        } else if (cls === 'Line') {
+          nodes.push({
+            type: 'line',
+            points: node.points().slice(),
+            stroke: node.stroke(),
+            strokeWidth: node.strokeWidth(),
+          });
+        }
+      });
+
+      const tpl = {
+        version: 1,
+        widthMm: parseFloat(inputWidth.value) || 58,
+        heightMm: parseFloat(inputHeight.value) || 40,
+        nodes,
+      };
+      const blob = new Blob([JSON.stringify(tpl, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'template.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function loadTemplate(input) {
+      const file = input.files[0];
+      if (!file) return;
+      input.value = '';
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const tpl = JSON.parse(e.target.result);
+          if (!tpl.nodes || !Array.isArray(tpl.nodes)) throw new Error('Invalid template');
+
+          if (tpl.widthMm) inputWidth.value = tpl.widthMm;
+          if (tpl.heightMm) inputHeight.value = tpl.heightMm;
+
+          initStage(false);
+          restoreSavedNodes(tpl.nodes);
+
+          transformer.nodes([]);
+          layer.batchDraw();
+          schedulePreviewUpdate();
+          showToast('Template loaded!', 'success');
+        } catch (err) {
+          showToast('Failed to load template: ' + err.message, 'danger');
+        }
+      };
+      reader.readAsText(file);
     }
 
     // ── PDF generation ───────────────────────────────────────────────
@@ -741,32 +1091,19 @@
       layer.batchDraw();
     }
 
-    // ── Clear ────────────────────────────────────────────────────────
-
-    /** Clear all label text and reset counter. */
-    function clearLabels() {
-      inputLabels.value = '';
-      updateCounter();
-    }
-
     // ── Stage resize on mm-input change ──────────────────────────────
 
     function handleDimensionChange() {
-      const widthMm  = parseFloat(inputWidth.value)  || 58;
-      const heightMm = parseFloat(inputHeight.value) || 40;
-      const newW = Math.round(widthMm  * PX_PER_MM);
-      const newH = Math.round(heightMm * PX_PER_MM);
-      stage.width(newW);
-      stage.height(newH);
-      bgRect.width(newW);
-      bgRect.height(newH);
-      layer.batchDraw();
-      applyZoom();
+      initStage();
+      schedulePreviewUpdate();
     }
 
     // ── Event listeners ──────────────────────────────────────────────
 
-    inputLabels.addEventListener('input', updateCounter);
+    inputLabels.addEventListener('input', () => {
+      updateCounter();
+      schedulePreviewUpdate();
+    });
 
     inputWidth.addEventListener('input',  handleDimensionChange);
     inputHeight.addEventListener('input', handleDimensionChange);
@@ -780,6 +1117,7 @@
     addTextNodeWithProps('%%ENTITY1%%', 10, 10, parseInt(inputFontsize.value, 10) || 20, '#000000');
     transformer.nodes([]);
     layer.batchDraw();
+    schedulePreviewUpdate();
   </script>
 </body>
 </html>
