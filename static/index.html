@@ -1638,9 +1638,8 @@
       URL.revokeObjectURL(url);
     }
 
-    /** Persist current template to localStorage. */
-    function autoSaveTemplate() {
-      if (!layer) return;
+    function serializeLayerNodes() {
+      if (!layer) return [];
 
       const nodes = [];
       layer.getChildren().forEach(node => {
@@ -1715,6 +1714,15 @@
         }
       });
 
+      return nodes;
+    }
+
+    /** Persist current template to localStorage. */
+    function autoSaveTemplate() {
+      if (!layer) return;
+
+      const nodes = serializeLayerNodes();
+
       const tpl = {
         version: 1,
         widthMm: parseFloat(inputWidth.value) || 58,
@@ -1723,6 +1731,134 @@
         nodes,
       };
       localStorage.setItem('lm_template', JSON.stringify(tpl));
+    }
+
+    async function renderOffscreenLabel(serializedNodes, row, stageW, stageH, thumbScale) {
+      const offscreenContainer = document.createElement('div');
+      offscreenContainer.style.position = 'absolute';
+      offscreenContainer.style.left = '0';
+      offscreenContainer.style.top = '0';
+      offscreenContainer.style.width = '0';
+      offscreenContainer.style.height = '0';
+      offscreenContainer.style.overflow = 'hidden';
+      offscreenContainer.style.opacity = '0';
+      offscreenContainer.style.pointerEvents = 'none';
+      document.body.appendChild(offscreenContainer);
+
+      let offStage = null;
+      try {
+        offStage = new Konva.Stage({
+          container: offscreenContainer,
+          width: stageW,
+          height: stageH,
+        });
+        const offLayer = new Konva.Layer();
+        offStage.add(offLayer);
+
+        const offBgRect = new Konva.Rect({
+          x: 0,
+          y: 0,
+          width: stageW,
+          height: stageH,
+          fill: '#ffffff',
+          listening: false,
+        });
+        offLayer.add(offBgRect);
+
+        for (const n of serializedNodes) {
+          if (n.type === 'text') {
+            const textNode = new Konva.Text({
+              text: substituteEntityPlaceholders(n.text, row),
+              x: n.x,
+              y: n.y,
+              rotation: n.rotation || 0,
+              scaleX: n.scaleX !== undefined ? n.scaleX : 1,
+              scaleY: n.scaleY !== undefined ? n.scaleY : 1,
+              fontSize: n.fontSize,
+              fill: n.fill,
+              width: n.width,
+              align: n.align || 'left',
+              wrap: 'word',
+            });
+            offLayer.add(textNode);
+          } else if (n.type === 'qr') {
+            const content = substituteEntityPlaceholders(n.content || '', row);
+            const qrCanvas = document.createElement('canvas');
+            new QRious({ element: qrCanvas, value: content || ' ', size: 256 });
+            const qrNode = new Konva.Image({
+              image: qrCanvas,
+              x: n.x,
+              y: n.y,
+              rotation: n.rotation || 0,
+              scaleX: n.scaleX !== undefined ? n.scaleX : 1,
+              scaleY: n.scaleY !== undefined ? n.scaleY : 1,
+              width: n.width,
+              height: n.height,
+            });
+            offLayer.add(qrNode);
+          } else if (n.type === 'image' && n.isUrl === true) {
+            const resolvedUrl = substituteEntityPlaceholders(n.urlTemplate || '', row);
+            let imageForRow = createUrlPlaceholderImage();
+            if (resolvedUrl) {
+              try {
+                imageForRow = await loadImageFromUrl(resolvedUrl);
+              } catch {
+                imageForRow = createUrlPlaceholderImage();
+              }
+            }
+            const imageNode = new Konva.Image({
+              image: imageForRow instanceof HTMLImageElement
+                ? fitImageToCanvas(imageForRow, n.width, n.height)
+                : imageForRow,
+              x: n.x,
+              y: n.y,
+              rotation: n.rotation || 0,
+              scaleX: n.scaleX !== undefined ? n.scaleX : 1,
+              scaleY: n.scaleY !== undefined ? n.scaleY : 1,
+              width: n.width,
+              height: n.height,
+            });
+            offLayer.add(imageNode);
+          } else if (n.type === 'image' && n.src) {
+            const imgEl = await new Promise((resolve, reject) => {
+              const img = new Image();
+              img.onload = () => resolve(img);
+              img.onerror = () => reject(new Error('Failed to load image data URL'));
+              img.src = n.src;
+            });
+            const imageNode = new Konva.Image({
+              image: imgEl,
+              x: n.x,
+              y: n.y,
+              rotation: n.rotation || 0,
+              scaleX: n.scaleX !== undefined ? n.scaleX : 1,
+              scaleY: n.scaleY !== undefined ? n.scaleY : 1,
+              width: n.width,
+              height: n.height,
+            });
+            offLayer.add(imageNode);
+          } else if (n.type === 'line') {
+            const lineNode = new Konva.Line({
+              points: n.points,
+              x: n.x || 0,
+              y: n.y || 0,
+              rotation: n.rotation || 0,
+              scaleX: n.scaleX !== undefined ? n.scaleX : 1,
+              scaleY: n.scaleY !== undefined ? n.scaleY : 1,
+              stroke: n.stroke || '#000000',
+              strokeWidth: n.strokeWidth || 2,
+              lineCap: 'round',
+            });
+            offLayer.add(lineNode);
+          }
+        }
+
+        offLayer.batchDraw();
+        return offStage.toDataURL({ pixelRatio: thumbScale });
+      } finally {
+        if (offStage) offStage.destroy();
+        offscreenContainer.remove();
+      }
     }
 
     function loadTemplate(input) {
@@ -1864,70 +2000,21 @@
 
       const rows = getRows();
       const strip = document.getElementById('preview-strip');
-      strip.innerHTML = '';
-      strip.style.display = 'flex';
 
       if (rows.length === 0) {
         strip.innerHTML = '<span style="color:#666; font-size:0.82rem; padding:8px;">No labels — add at least one row.</span>';
+        strip.style.display = 'flex';
         return;
       }
 
-      const textNodes = layer.getChildren().filter(n => n.getClassName() === 'Text');
-      const originalTexts = textNodes.map(n => n.text());
-      const qrNodes = layer.getChildren().filter(n => n._isQrNode === true);
-      const originalQrImages = qrNodes.map(n => n.image());
-      const urlImageNodes = layer.getChildren().filter(n => n._isUrlNode === true);
-      const originalUrlImages = urlImageNodes.map(n => n.image());
-
-      // Temporarily detach transformer
-      const prevSelected = transformer.nodes().slice();
-      transformer.nodes([]);
-
-      // Hide endpoint handles so they don't appear in preview thumbnails
-      activeLineHandles.forEach(h => h.hide());
+      const stageW = stage.width();
+      const stageH = stage.height();
+      const thumbScale = 100 / stageH;
+      const serializedNodes = serializeLayerNodes();
+      const fragment = document.createDocumentFragment();
 
       for (const row of rows) {
-        // Substitute ENTITY placeholders; convert literal \n sequences to real newlines
-        textNodes.forEach((node, ni) => {
-          node.text(substituteEntityPlaceholders(originalTexts[ni], row));
-        });
-
-        // Substitute placeholders in QR content and regenerate QR image synchronously
-        qrNodes.forEach((node) => {
-          const content = substituteEntityPlaceholders(node._qrContent || '', row);
-
-          // Render QR at high resolution for crisp preview thumbnails
-          const qrCanvas = document.createElement('canvas');
-          new QRious({ element: qrCanvas, value: content || ' ', size: 512 });
-          node.image(qrCanvas);
-        });
-
-        await Promise.all(urlImageNodes.map(async (node) => {
-          const resolvedUrl = substituteEntityPlaceholders(node._srcTemplate || '', row);
-          let imageForRow = createUrlPlaceholderImage();
-          if (resolvedUrl) {
-            try {
-              imageForRow = await loadImageFromUrl(resolvedUrl);
-            } catch {
-              imageForRow = createUrlPlaceholderImage();
-            }
-          }
-          if (imageForRow instanceof HTMLImageElement) {
-            node.image(fitImageToCanvas(imageForRow, node.width(), node.height()));
-          } else {
-            node.image(imageForRow);
-          }
-        }));
-        layer.batchDraw();
-
-        // Render thumbnail at reduced resolution (target ~100px height)
-        const thumbScale = 100 / stage.height();
-        const dataUrl = stage.toDataURL({ pixelRatio: thumbScale });
-
-        // Restore texts immediately
-        textNodes.forEach((node, ni) => node.text(originalTexts[ni]));
-        qrNodes.forEach((node, ni) => node.image(originalQrImages[ni]));
-        urlImageNodes.forEach((node, ni) => node.image(originalUrlImages[ni]));
+        const dataUrl = await renderOffscreenLabel(serializedNodes, row, stageW, stageH, thumbScale);
 
         // Create thumbnail element
         const wrapper = document.createElement('div');
@@ -1938,16 +2025,12 @@
         label.textContent = row.entities.find(e => e) || '(empty)';
         wrapper.appendChild(img);
         wrapper.appendChild(label);
-        strip.appendChild(wrapper);
+        fragment.appendChild(wrapper);
       }
 
-      // Restore transformer
-      transformer.nodes(prevSelected);
-      layer.batchDraw();
-
-      // Restore endpoint handle visibility
-      activeLineHandles.forEach(h => h.show());
-      layer.batchDraw();
+      strip.innerHTML = '';
+      strip.appendChild(fragment);
+      strip.style.display = 'flex';
     }
 
     // ── Stage resize on mm-input change ──────────────────────────────
