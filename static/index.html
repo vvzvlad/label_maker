@@ -322,19 +322,17 @@
         <label class="form-label">Entities</label>
         <div class="entities-table-wrap">
           <table class="table table-sm entities-table">
-            <thead>
-              <tr>
-                <th>Entity 1</th>
-                <th>Entity 2</th>
-                <th>Entity 3</th>
-                <th style="width:1%;"></th>
-              </tr>
+            <thead id="entities-thead">
+              <tr id="entities-thead-row"></tr>
             </thead>
             <tbody id="entities-tbody"></tbody>
           </table>
         </div>
         <button id="btn-add-entity-row" type="button" class="btn btn-outline-secondary btn-sm mt-2">
           <i class="bi bi-plus-lg me-1"></i>Add row
+        </button>
+        <button id="btn-add-entity-col" type="button" class="btn btn-outline-secondary btn-sm mt-2">
+          <i class="bi bi-layout-three-columns me-1"></i>Add column
         </button>
         <button id="btn-clear-table" type="button" class="btn btn-outline-danger btn-sm mt-2">
           <i class="bi bi-x-circle me-1"></i>Clear Table
@@ -464,6 +462,7 @@
     let bgRect      = null;
     let previewTimer = null;
     let activeLineHandles = [];
+    let entityColumnCount = 3;
 
     function schedulePreviewUpdate() {
       clearTimeout(previewTimer);
@@ -717,14 +716,18 @@
 
     function substituteEntityPlaceholders(value, row) {
       let result = value || '';
-      result = result.replace(/%E1%/g, (row.entity1 || '').replace(/\\n/g, '\n'));
-      result = result.replace(/%E2%/g, (row.entity2 || '').replace(/\\n/g, '\n'));
-      result = result.replace(/%E3%/g, (row.entity3 || '').replace(/\\n/g, '\n'));
+      const entities = Array.isArray(row?.entities)
+        ? row.entities
+        : [row?.entity1 || '', row?.entity2 || '', row?.entity3 || ''];
+      for (let i = 0; i < entities.length; i += 1) {
+        const replacement = (entities[i] || '').replace(/\\n/g, '\n');
+        result = result.replace(new RegExp(`%E${i + 1}%`, 'g'), replacement);
+      }
       return result;
     }
 
     async function buildUrlNodePreviewImage(urlTemplate) {
-      const hasPlaceholders = /%E[123]%/.test(urlTemplate || '');
+      const hasPlaceholders = /%E\d+%/.test(urlTemplate || '');
       if (!urlTemplate || hasPlaceholders) {
         return createUrlPlaceholderImage();
       }
@@ -735,20 +738,44 @@
       }
     }
 
+    function renderTableHeader() {
+      const headRow = document.getElementById('entities-thead-row');
+      headRow.innerHTML = '';
+
+      for (let i = 0; i < entityColumnCount; i += 1) {
+        const th = document.createElement('th');
+        th.textContent = `%E${i + 1}%`;
+        headRow.appendChild(th);
+      }
+
+      const actionTh = document.createElement('th');
+      actionTh.style.width = '1%';
+      headRow.appendChild(actionTh);
+    }
+
     /** Append a new entity row to the entities table. */
-    function addEntityRow(e1 = '', e2 = '', e3 = '') {
+    function addEntityRow(entities = []) {
       const tbody = document.getElementById('entities-tbody');
       const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td><input type="text" class="entity-input form-control form-control-sm" value="${e1}" /></td>
-        <td><input type="text" class="entity-input form-control form-control-sm" value="${e2}" /></td>
-        <td><input type="text" class="entity-input form-control form-control-sm" value="${e3}" /></td>
-        <td class="text-center">
-          <button type="button" class="btn btn-danger btn-sm btn-delete-row" title="Delete row" aria-label="Delete row">
-            <i class="bi bi-trash"></i>
-          </button>
-        </td>
+
+      for (let i = 0; i < entityColumnCount; i += 1) {
+        const td = document.createElement('td');
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'entity-input form-control form-control-sm';
+        input.value = entities[i] || '';
+        td.appendChild(input);
+        tr.appendChild(td);
+      }
+
+      const deleteCell = document.createElement('td');
+      deleteCell.className = 'text-center';
+      deleteCell.innerHTML = `
+        <button type="button" class="btn btn-danger btn-sm btn-delete-row" title="Delete row" aria-label="Delete row">
+          <i class="bi bi-trash"></i>
+        </button>
       `;
+      tr.appendChild(deleteCell);
       tbody.appendChild(tr);
 
       tr.querySelector('.btn-delete-row').addEventListener('click', () => {
@@ -767,11 +794,12 @@
       const rows = [];
       tbody.querySelectorAll('tr').forEach((tr) => {
         const inputs = tr.querySelectorAll('input.entity-input');
-        const entity1 = (inputs[0]?.value || '').trim();
-        const entity2 = (inputs[1]?.value || '').trim();
-        const entity3 = (inputs[2]?.value || '').trim();
-        if (entity1 !== '' || entity2 !== '' || entity3 !== '') {
-          rows.push({ entity1, entity2, entity3 });
+        const entities = [];
+        for (let i = 0; i < entityColumnCount; i += 1) {
+          entities.push((inputs[i]?.value || '').trim());
+        }
+        if (entities.some(entity => entity !== '')) {
+          rows.push({ entities });
         }
       });
       return rows;
@@ -783,13 +811,16 @@
       const rows = [];
       tbody.querySelectorAll('tr').forEach((tr) => {
         const inputs = tr.querySelectorAll('input.entity-input');
-        rows.push({
-          entity1: inputs[0]?.value || '',
-          entity2: inputs[1]?.value || '',
-          entity3: inputs[2]?.value || '',
-        });
+        const entities = [];
+        for (let i = 0; i < entityColumnCount; i += 1) {
+          entities.push(inputs[i]?.value || '');
+        }
+        rows.push({ entities });
       });
-      localStorage.setItem('lm_table', JSON.stringify(rows));
+      localStorage.setItem('lm_table', JSON.stringify({
+        columnCount: entityColumnCount,
+        rows,
+      }));
     }
 
     /** Update the label count display. */
@@ -1833,7 +1864,7 @@
         const img = document.createElement('img');
         img.src = dataUrl;
         const label = document.createElement('span');
-        label.textContent = row.entity1 || row.entity2 || row.entity3 || '(empty)';
+        label.textContent = row.entities.find(e => e) || '(empty)';
         wrapper.appendChild(img);
         wrapper.appendChild(label);
         strip.appendChild(wrapper);
@@ -1911,6 +1942,24 @@
       autoSaveTable();
     });
 
+    document.getElementById('btn-add-entity-col').addEventListener('click', () => {
+      entityColumnCount += 1;
+      renderTableHeader();
+
+      const tbody = document.getElementById('entities-tbody');
+      tbody.querySelectorAll('tr').forEach((tr) => {
+        const td = document.createElement('td');
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'entity-input form-control form-control-sm';
+        td.appendChild(input);
+        tr.insertBefore(td, tr.lastElementChild);
+      });
+
+      schedulePreviewUpdate();
+      autoSaveTable();
+    });
+
     document.getElementById('btn-clear-table').addEventListener('click', () => {
       const tbody = document.getElementById('entities-tbody');
       tbody.innerHTML = '';
@@ -1938,17 +1987,35 @@
       const savedTableRaw = localStorage.getItem('lm_table');
       if (savedTableRaw) {
         const savedTable = JSON.parse(savedTableRaw);
-        if (Array.isArray(savedTable) && savedTable.length > 0) {
-          savedTable.forEach((r) => {
-            addEntityRow(r?.entity1 || '', r?.entity2 || '', r?.entity3 || '');
+        let restoredRows = [];
+        if (savedTable && typeof savedTable === 'object' && Array.isArray(savedTable.rows)) {
+          entityColumnCount = Number.isInteger(savedTable.columnCount) && savedTable.columnCount > 0
+            ? savedTable.columnCount
+            : 3;
+          restoredRows = savedTable.rows.map((r) => ({
+            entities: Array.isArray(r?.entities) ? r.entities : [],
+          }));
+        } else if (Array.isArray(savedTable)) {
+          entityColumnCount = 3;
+          restoredRows = savedTable.map((r) => ({
+            entities: [r?.entity1 || '', r?.entity2 || '', r?.entity3 || ''],
+          }));
+        }
+
+        renderTableHeader();
+        if (restoredRows.length > 0) {
+          restoredRows.forEach((r) => {
+            addEntityRow(r.entities);
           });
         } else {
           addEntityRow();
         }
       } else {
+        renderTableHeader();
         addEntityRow();
       }
     } catch {
+      renderTableHeader();
       addEntityRow();
     }
 
