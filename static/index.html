@@ -370,9 +370,14 @@
           <button id="btn-add-text" class="btn btn-outline-secondary btn-sm" onclick="addTextNode()">
             <i class="bi bi-fonts me-1"></i>Text
           </button>
-          <button class="btn btn-outline-secondary btn-sm" onclick="document.getElementById('img-upload').click()">
-            <i class="bi bi-image me-1"></i>Image
-          </button>
+          <div class="btn-group btn-group-sm" role="group" aria-label="Add image source">
+            <button class="btn btn-outline-secondary" onclick="document.getElementById('img-upload').click()">
+              <i class="bi bi-image me-1"></i>From File
+            </button>
+            <button class="btn btn-outline-secondary" onclick="addImageNodeFromUrl()">
+              <i class="bi bi-link-45deg me-1"></i>From URL
+            </button>
+          </div>
           <input type="file" id="img-upload" accept="image/*" style="display:none" onchange="addImageNode(this)" />
           <button class="btn btn-outline-secondary btn-sm" onclick="addLineNode()">
             <i class="bi bi-slash-lg me-1"></i>Line
@@ -685,6 +690,51 @@
       img.src = dataUrl;
     }
 
+    function createUrlPlaceholderImage() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 120;
+      canvas.height = 80;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#888888';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 16px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('URL Image', canvas.width / 2, canvas.height / 2);
+      return canvas;
+    }
+
+    function loadImageFromUrl(url) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error('Failed to load image URL'));
+        img.src = url;
+      });
+    }
+
+    function substituteEntityPlaceholders(value, row) {
+      let result = value || '';
+      result = result.replace(/%E1%/g, (row.entity1 || '').replace(/\\n/g, '\n'));
+      result = result.replace(/%E2%/g, (row.entity2 || '').replace(/\\n/g, '\n'));
+      result = result.replace(/%E3%/g, (row.entity3 || '').replace(/\\n/g, '\n'));
+      return result;
+    }
+
+    async function buildUrlNodePreviewImage(urlTemplate) {
+      const hasPlaceholders = /%E[123]%/.test(urlTemplate || '');
+      if (!urlTemplate || hasPlaceholders) {
+        return createUrlPlaceholderImage();
+      }
+      try {
+        return await loadImageFromUrl(urlTemplate);
+      } catch {
+        return createUrlPlaceholderImage();
+      }
+    }
+
     /** Append a new entity row to the entities table. */
     function addEntityRow(e1 = '', e2 = '', e3 = '') {
       const tbody = document.getElementById('entities-tbody');
@@ -809,6 +859,20 @@
                 width:    node.width(),
                 height:   node.height(),
                 content:  node._qrContent,
+              });
+            } else if (node._isUrlNode) {
+              savedNodes.push({
+                type:        'image',
+                isUrl:       true,
+                urlTemplate: node._srcTemplate,
+                src:         null,
+                x:           node.x(),
+                y:           node.y(),
+                rotation:    node.rotation(),
+                scaleX:      node.scaleX(),
+                scaleY:      node.scaleY(),
+                width:       node.width(),
+                height:      node.height(),
               });
             } else {
               savedNodes.push({
@@ -1058,6 +1122,70 @@
       schedulePreviewUpdate();
     }
 
+    function attachImageNodeHandlers(kImg) {
+      kImg.on('click tap', (ev) => {
+        ev.cancelBubble = true;
+        transformer.enabledAnchors(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
+        transformer.nodes([kImg]);
+        layer.batchDraw();
+      });
+      kImg.on('contextmenu', (ev) => {
+        ev.evt.preventDefault();
+        transformer.enabledAnchors(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
+        transformer.nodes([kImg]);
+        layer.batchDraw();
+        showContextMenu(ev.evt.clientX, ev.evt.clientY, kImg);
+      });
+      kImg.on('dblclick dbltap', () => {
+        if (kImg._isUrlNode) {
+          editUrlNodeTemplate(kImg);
+        }
+      });
+      kImg.on('dragend', schedulePreviewUpdate);
+    }
+
+    async function editUrlNodeTemplate(node) {
+      const updated = window.prompt('Image URL template:', node._srcTemplate || '');
+      if (updated === null) return;
+      const trimmed = updated.trim();
+      if (!trimmed) return;
+
+      node._srcTemplate = trimmed;
+      const previewImage = await buildUrlNodePreviewImage(trimmed);
+      node.image(previewImage);
+      layer.batchDraw();
+      schedulePreviewUpdate();
+    }
+
+    async function addImageNodeFromUrl() {
+      const urlTemplateInput = window.prompt('Image URL template:', '');
+      if (urlTemplateInput === null) return;
+      const urlTemplate = urlTemplateInput.trim();
+      if (!urlTemplate) return;
+
+      const previewImage = await buildUrlNodePreviewImage(urlTemplate);
+      const defaultSize = 80;
+
+      const kImg = new Konva.Image({
+        image: previewImage,
+        x: (stage.width() - defaultSize) / 2,
+        y: (stage.height() - defaultSize) / 2,
+        width: defaultSize,
+        height: defaultSize,
+        draggable: true,
+      });
+      kImg._isUrlNode = true;
+      kImg._srcTemplate = urlTemplate;
+      kImg._srcDataUrl = null;
+      layer.add(kImg);
+      attachImageNodeHandlers(kImg);
+
+      transformer.enabledAnchors(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
+      transformer.nodes([kImg]);
+      layer.batchDraw();
+      schedulePreviewUpdate();
+    }
+
     function addImageNode(input) {
       const file = input.files[0];
       if (!file) return;
@@ -1088,22 +1216,10 @@
             draggable: true,
           });
           kImg._srcDataUrl = e.target.result;
+          kImg._isUrlNode = false;
+          kImg._srcTemplate = null;
           layer.add(kImg);
-
-          kImg.on('click tap', (ev) => {
-            ev.cancelBubble = true;
-            transformer.enabledAnchors(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
-            transformer.nodes([kImg]);
-            layer.batchDraw();
-          });
-          kImg.on('contextmenu', (ev) => {
-            ev.evt.preventDefault();
-            transformer.enabledAnchors(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
-            transformer.nodes([kImg]);
-            layer.batchDraw();
-            showContextMenu(ev.evt.clientX, ev.evt.clientY, kImg);
-          });
-          kImg.on('dragend', schedulePreviewUpdate);
+          attachImageNodeHandlers(kImg);
 
           transformer.nodes([kImg]);
           layer.batchDraw();
@@ -1213,6 +1329,35 @@
       schedulePreviewUpdate();
     }
 
+    function restoreUrlImageNode(n) {
+      const defaultImage = createUrlPlaceholderImage();
+      const kImg = new Konva.Image({
+        image: defaultImage,
+        x: n.x,
+        y: n.y,
+        width: n.width,
+        height: n.height,
+        rotation: n.rotation || 0,
+        scaleX: n.scaleX !== undefined ? n.scaleX : 1,
+        scaleY: n.scaleY !== undefined ? n.scaleY : 1,
+        draggable: true,
+      });
+      kImg._isUrlNode = true;
+      kImg._srcTemplate = n.urlTemplate || '';
+      kImg._srcDataUrl = null;
+      layer.add(kImg);
+      attachImageNodeHandlers(kImg);
+      layer.batchDraw();
+      schedulePreviewUpdate();
+
+      buildUrlNodePreviewImage(kImg._srcTemplate).then((previewImage) => {
+        if (!kImg.getStage()) return;
+        kImg.image(previewImage);
+        layer.batchDraw();
+        schedulePreviewUpdate();
+      });
+    }
+
     function restoreSavedNodes(nodes) {
       nodes.forEach(n => {
         if (n.type === 'text') {
@@ -1221,6 +1366,8 @@
           if (n.rotation) node.rotation(n.rotation);
           if (n.scaleX   !== undefined) node.scaleX(n.scaleX);
           if (n.scaleY   !== undefined) node.scaleY(n.scaleY);
+        } else if (n.type === 'image' && n.isUrl === true) {
+          restoreUrlImageNode(n);
         } else if (n.type === 'image' && n.src) {
           const imgEl = new Image();
           imgEl.onload = () => {
@@ -1236,22 +1383,10 @@
               draggable: true,
             });
             kImg._srcDataUrl = n.src;
+            kImg._isUrlNode = false;
+            kImg._srcTemplate = null;
             layer.add(kImg);
-
-            kImg.on('click tap', (e) => {
-              e.cancelBubble = true;
-              transformer.enabledAnchors(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
-              transformer.nodes([kImg]);
-              layer.batchDraw();
-            });
-            kImg.on('contextmenu', (e) => {
-              e.evt.preventDefault();
-              transformer.enabledAnchors(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
-              transformer.nodes([kImg]);
-              layer.batchDraw();
-              showContextMenu(e.evt.clientX, e.evt.clientY, kImg);
-            });
-            kImg.on('dragend', schedulePreviewUpdate);
+            attachImageNodeHandlers(kImg);
             layer.batchDraw();
             schedulePreviewUpdate();
           };
@@ -1351,6 +1486,20 @@
               height:   node.height(),
               content:  node._qrContent,
             });
+          } else if (node._isUrlNode) {
+            nodes.push({
+              type:        'image',
+              isUrl:       true,
+              urlTemplate: node._srcTemplate,
+              src:         null,
+              x:           node.x(),
+              y:           node.y(),
+              rotation:    node.rotation(),
+              scaleX:      node.scaleX(),
+              scaleY:      node.scaleY(),
+              width:       node.width(),
+              height:      node.height(),
+            });
           } else {
             nodes.push({
               type:     'image',
@@ -1430,6 +1579,20 @@
               height:   node.height(),
               content:  node._qrContent,
             });
+          } else if (node._isUrlNode) {
+            nodes.push({
+              type:        'image',
+              isUrl:       true,
+              urlTemplate: node._srcTemplate,
+              src:         null,
+              x:           node.x(),
+              y:           node.y(),
+              rotation:    node.rotation(),
+              scaleX:      node.scaleX(),
+              scaleY:      node.scaleY(),
+              width:       node.width(),
+              height:      node.height(),
+            });
           } else {
             nodes.push({
               type:     'image',
@@ -1506,7 +1669,7 @@
      * Placeholders matching %%ANYTHING%% in text nodes are replaced per label line.
      * The stage is exported as a PNG via stage.toDataURL() at 300 DPI equivalent.
      */
-    function generatePDF() {
+    async function generatePDF() {
       const rows = getRows();
       if (rows.length === 0) {
         showToast('No labels to generate. Add at least one row first.', 'danger');
@@ -1528,10 +1691,12 @@
       // Collect all text nodes (skip background rect and transformer)
       const textNodes = layer.getChildren().filter(n => n.getClassName() === 'Text');
       const qrNodes = layer.getChildren().filter(n => n._isQrNode === true);
+      const urlImageNodes = layer.getChildren().filter(n => n._isUrlNode === true);
 
       // Remember original texts for restoration after each export
       const originalTexts = textNodes.map(n => n.text());
       const originalQrImages = qrNodes.map(n => n.image());
+      const originalUrlImages = urlImageNodes.map(n => n.image());
 
       // Detach transformer so it doesn't appear in exported image
       const prevSelected = transformer.nodes().slice();
@@ -1540,30 +1705,37 @@
       // Hide endpoint handles so they don't appear in exported PDF
       activeLineHandles.forEach(h => h.hide());
 
-      rows.forEach((row, idx) => {
+      for (let idx = 0; idx < rows.length; idx += 1) {
+        const row = rows[idx];
         if (idx > 0) doc.addPage([widthMm, heightMm], orientation);
 
         // Substitute ENTITY placeholders; convert literal \n sequences to real newlines
         textNodes.forEach((node, ni) => {
-          let t = originalTexts[ni];
-          t = t.replace(/%E1%/g, row.entity1.replace(/\\n/g, '\n'));
-          t = t.replace(/%E2%/g, row.entity2.replace(/\\n/g, '\n'));
-          t = t.replace(/%E3%/g, row.entity3.replace(/\\n/g, '\n'));
-          node.text(t);
+          node.text(substituteEntityPlaceholders(originalTexts[ni], row));
         });
 
         // Substitute placeholders in QR content and regenerate QR image synchronously
         qrNodes.forEach((node) => {
-          let content = node._qrContent || '';
-          content = content.replace(/%E1%/g, row.entity1.replace(/\\n/g, '\n'));
-          content = content.replace(/%E2%/g, row.entity2.replace(/\\n/g, '\n'));
-          content = content.replace(/%E3%/g, row.entity3.replace(/\\n/g, '\n'));
+          const content = substituteEntityPlaceholders(node._qrContent || '', row);
 
           // Render QR at high resolution so it stays sharp in high-DPI PDF export
           const qrCanvas = document.createElement('canvas');
           new QRious({ element: qrCanvas, value: content || ' ', size: 512 });
           node.image(qrCanvas);
         });
+
+        await Promise.all(urlImageNodes.map(async (node) => {
+          const resolvedUrl = substituteEntityPlaceholders(node._srcTemplate || '', row);
+          let imageForRow = createUrlPlaceholderImage();
+          if (resolvedUrl) {
+            try {
+              imageForRow = await loadImageFromUrl(resolvedUrl);
+            } catch {
+              imageForRow = createUrlPlaceholderImage();
+            }
+          }
+          node.image(imageForRow);
+        }));
 
         layer.batchDraw();
 
@@ -1574,7 +1746,8 @@
         // Restore original texts
         textNodes.forEach((node, ni) => node.text(originalTexts[ni]));
         qrNodes.forEach((node, ni) => node.image(originalQrImages[ni]));
-      });
+        urlImageNodes.forEach((node, ni) => node.image(originalUrlImages[ni]));
+      }
 
       // Restore transformer selection
       transformer.nodes(prevSelected);
@@ -1588,7 +1761,7 @@
       showToast(`PDF with ${rows.length} label${rows.length > 1 ? 's' : ''} generated!`, 'success');
     }
 
-    function renderPreviewStrip() {
+    async function renderPreviewStrip() {
       autoSaveTemplate();
 
       const rows = getRows();
@@ -1605,6 +1778,8 @@
       const originalTexts = textNodes.map(n => n.text());
       const qrNodes = layer.getChildren().filter(n => n._isQrNode === true);
       const originalQrImages = qrNodes.map(n => n.image());
+      const urlImageNodes = layer.getChildren().filter(n => n._isUrlNode === true);
+      const originalUrlImages = urlImageNodes.map(n => n.image());
 
       // Temporarily detach transformer
       const prevSelected = transformer.nodes().slice();
@@ -1613,28 +1788,34 @@
       // Hide endpoint handles so they don't appear in preview thumbnails
       activeLineHandles.forEach(h => h.hide());
 
-      rows.forEach((row) => {
+      for (const row of rows) {
         // Substitute ENTITY placeholders; convert literal \n sequences to real newlines
         textNodes.forEach((node, ni) => {
-          let t = originalTexts[ni];
-          t = t.replace(/%E1%/g, row.entity1.replace(/\\n/g, '\n'));
-          t = t.replace(/%E2%/g, row.entity2.replace(/\\n/g, '\n'));
-          t = t.replace(/%E3%/g, row.entity3.replace(/\\n/g, '\n'));
-          node.text(t);
+          node.text(substituteEntityPlaceholders(originalTexts[ni], row));
         });
 
         // Substitute placeholders in QR content and regenerate QR image synchronously
         qrNodes.forEach((node) => {
-          let content = node._qrContent || '';
-          content = content.replace(/%E1%/g, row.entity1.replace(/\\n/g, '\n'));
-          content = content.replace(/%E2%/g, row.entity2.replace(/\\n/g, '\n'));
-          content = content.replace(/%E3%/g, row.entity3.replace(/\\n/g, '\n'));
+          const content = substituteEntityPlaceholders(node._qrContent || '', row);
 
           // Render QR at high resolution for crisp preview thumbnails
           const qrCanvas = document.createElement('canvas');
           new QRious({ element: qrCanvas, value: content || ' ', size: 512 });
           node.image(qrCanvas);
         });
+
+        await Promise.all(urlImageNodes.map(async (node) => {
+          const resolvedUrl = substituteEntityPlaceholders(node._srcTemplate || '', row);
+          let imageForRow = createUrlPlaceholderImage();
+          if (resolvedUrl) {
+            try {
+              imageForRow = await loadImageFromUrl(resolvedUrl);
+            } catch {
+              imageForRow = createUrlPlaceholderImage();
+            }
+          }
+          node.image(imageForRow);
+        }));
         layer.batchDraw();
 
         // Render thumbnail at reduced resolution (target ~100px height)
@@ -1644,6 +1825,7 @@
         // Restore texts immediately
         textNodes.forEach((node, ni) => node.text(originalTexts[ni]));
         qrNodes.forEach((node, ni) => node.image(originalQrImages[ni]));
+        urlImageNodes.forEach((node, ni) => node.image(originalUrlImages[ni]));
 
         // Create thumbnail element
         const wrapper = document.createElement('div');
@@ -1655,7 +1837,7 @@
         wrapper.appendChild(img);
         wrapper.appendChild(label);
         strip.appendChild(wrapper);
-      });
+      }
 
       // Restore transformer
       transformer.nodes(prevSelected);
