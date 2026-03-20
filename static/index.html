@@ -303,23 +303,21 @@
 
     <!-- Left sidebar: settings + input -->
     <div class="sidebar">
-      <div class="section-header">Settings</div>
 
-      <!-- Width / Height row -->
-      <div class="row g-2">
-        <div class="col">
-          <label class="form-label" for="input-width">Width (mm)</label>
-          <input type="number" id="input-width" class="form-control" value="58" min="1" step="1" />
-        </div>
-        <div class="col">
-          <label class="form-label" for="input-height">Height (mm)</label>
-          <input type="number" id="input-height" class="form-control" value="40" min="1" step="1" />
+      <!-- Data header + compact Label size input in one row -->
+      <div class="d-flex align-items-center gap-2">
+        <span class="section-header" style="margin:0; white-space:nowrap;">Data</span>
+        <div class="d-flex align-items-center gap-1 ms-auto">
+          <span style="font-size:0.75rem; color:#888; white-space:nowrap;">Label:</span>
+          <input type="number" id="input-width" class="form-control form-control-sm" value="58" min="1" step="1" style="width:58px;" />
+          <span style="font-size:0.75rem; color:#888;">×</span>
+          <input type="number" id="input-height" class="form-control form-control-sm" value="40" min="1" step="1" style="width:58px;" />
+          <span style="font-size:0.75rem; color:#888; white-space:nowrap;">mm</span>
         </div>
       </div>
 
-      <!-- Entities table -->
+      <!-- Entities table (no label above) -->
       <div style="flex:1; min-height:0; display:flex; flex-direction:column;">
-        <label class="form-label">Entities</label>
         <div class="entities-table-wrap">
           <table class="table table-sm entities-table">
             <thead id="entities-thead">
@@ -328,15 +326,15 @@
             <tbody id="entities-tbody"></tbody>
           </table>
         </div>
-        <button id="btn-add-entity-row" type="button" class="btn btn-outline-secondary btn-sm mt-2">
-          <i class="bi bi-plus-lg me-1"></i>Add row
-        </button>
-        <button id="btn-add-entity-col" type="button" class="btn btn-outline-secondary btn-sm mt-2">
-          <i class="bi bi-layout-three-columns me-1"></i>Add column
-        </button>
-        <button id="btn-clear-table" type="button" class="btn btn-outline-danger btn-sm mt-2">
-          <i class="bi bi-x-circle me-1"></i>Clear Table
-        </button>
+        <!-- Add row and Add column side by side -->
+        <div class="d-flex gap-2 mt-2">
+          <button id="btn-add-entity-row" type="button" class="btn btn-outline-secondary btn-sm flex-fill">
+            <i class="bi bi-plus-lg me-1"></i>Add row
+          </button>
+          <button id="btn-add-entity-col" type="button" class="btn btn-outline-secondary btn-sm flex-fill">
+            <i class="bi bi-layout-three-columns me-1"></i>Add column
+          </button>
+        </div>
       </div>
 
       <!-- Generate PDF button -->
@@ -346,12 +344,16 @@
         </button>
       </div>
 
+      <!-- Save / Load Template + Clear Table in one row -->
       <div class="d-flex gap-2">
         <button class="btn btn-outline-secondary btn-sm flex-fill" onclick="saveTemplate()">
           <i class="bi bi-download me-1"></i> Save Template
         </button>
         <button class="btn btn-outline-secondary btn-sm flex-fill" onclick="document.getElementById('tpl-upload').click()">
           <i class="bi bi-upload me-1"></i> Load Template
+        </button>
+        <button id="btn-clear-table" type="button" class="btn btn-outline-danger btn-sm">
+          <i class="bi bi-x-circle me-1"></i>Clear
         </button>
         <input type="file" id="tpl-upload" accept=".json,application/json" style="display:none" onchange="loadTemplate(this)" />
       </div>
