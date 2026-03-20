@@ -823,6 +823,7 @@
       // Single click → select (attach transformer)
       textNode.on('click tap', (e) => {
         e.cancelBubble = true;
+        transformer.enabledAnchors(['middle-left', 'middle-right']);
         transformer.nodes([textNode]);
         layer.batchDraw();
       });
@@ -835,6 +836,7 @@
       // Right-click → context menu
       textNode.on('contextmenu', (e) => {
         e.evt.preventDefault();
+        transformer.enabledAnchors(['middle-left', 'middle-right']);
         transformer.nodes([textNode]);
         layer.batchDraw();
         showContextMenu(e.evt.clientX, e.evt.clientY, textNode);
@@ -842,14 +844,11 @@
 
       textNode.on('dragend', schedulePreviewUpdate);
 
-      // Convert Transformer scaling into text box width changes.
-      // Font size remains controlled only via the context menu.
+      // Convert Transformer horizontal scale into text box width; font size stays fixed.
+      // Only scaleX is reset — scaleY is left untouched to avoid Y-position jumps from text reflow.
       textNode.on('transform', () => {
-        textNode.setAttrs({
-          width: Math.max(20, textNode.width() * textNode.scaleX()),
-          scaleX: 1,
-          scaleY: 1,
-        });
+        textNode.width(Math.max(20, textNode.width() * textNode.scaleX()));
+        textNode.scaleX(1);
         layer.batchDraw();
       });
       textNode.on('transformend', schedulePreviewUpdate);
@@ -923,6 +922,7 @@
         textNode.text(newText);
         textNode.show();
         transformer.nodes([textNode]);
+        transformer.enabledAnchors(['middle-left', 'middle-right']);
         layer.batchDraw();
         schedulePreviewUpdate();
         textarea.remove();
@@ -941,6 +941,7 @@
           committed = true;
           textNode.show();
           transformer.nodes([textNode]);
+          transformer.enabledAnchors(['middle-left', 'middle-right']);
           layer.batchDraw();
           textarea.remove();
         }
@@ -995,11 +996,13 @@
 
           kImg.on('click tap', (ev) => {
             ev.cancelBubble = true;
+            transformer.enabledAnchors(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
             transformer.nodes([kImg]);
             layer.batchDraw();
           });
           kImg.on('contextmenu', (ev) => {
             ev.evt.preventDefault();
+            transformer.enabledAnchors(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
             transformer.nodes([kImg]);
             layer.batchDraw();
             showContextMenu(ev.evt.clientX, ev.evt.clientY, kImg);
@@ -1079,11 +1082,13 @@
 
             kImg.on('click tap', (e) => {
               e.cancelBubble = true;
+              transformer.enabledAnchors(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
               transformer.nodes([kImg]);
               layer.batchDraw();
             });
             kImg.on('contextmenu', (e) => {
               e.evt.preventDefault();
+              transformer.enabledAnchors(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
               transformer.nodes([kImg]);
               layer.batchDraw();
               showContextMenu(e.evt.clientX, e.evt.clientY, kImg);
