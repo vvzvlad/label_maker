@@ -457,6 +457,7 @@
 
     // ── Konva state ─────────────────────────────────────────────────
     const PX_PER_MM = 96 / 25.4; // 96 DPI screen resolution
+    const PDF_DPI = 600;          // Output resolution for PDF export
 
     let stage       = null;
     let layer       = null;
@@ -703,6 +704,46 @@
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('URL Image', canvas.width / 2, canvas.height / 2);
+      return canvas;
+    }
+
+    function fitImageToCanvas(img, targetW, targetH) {
+      const sourceW = img.naturalWidth || img.width || targetW;
+      const sourceH = img.naturalHeight || img.height || targetH;
+      if (sourceW <= 0 || sourceH <= 0) {
+        // Fallback: return a white canvas of node dimensions.
+        const fallback = document.createElement('canvas');
+        fallback.width = Math.max(1, Math.round(targetW));
+        fallback.height = Math.max(1, Math.round(targetH));
+        const fc = fallback.getContext('2d');
+        fc.fillStyle = '#ffffff';
+        fc.fillRect(0, 0, fallback.width, fallback.height);
+        return fallback;
+      }
+
+      // Contain scale: how much to shrink the image to fit into targetW x targetH.
+      const containScale = Math.min(targetW / sourceW, targetH / sourceH);
+
+      // Keep canvas aspect ratio equal to the node ratio, but increase resolution
+      // so Konva can scale down without losing source-image detail.
+      const resFactor = Math.max(1, 1 / containScale);
+      const canvasW = Math.max(1, Math.round(targetW * resFactor));
+      const canvasH = Math.max(1, Math.round(targetH * resFactor));
+
+      const canvas = document.createElement('canvas');
+      canvas.width = canvasW;
+      canvas.height = canvasH;
+      const ctx = canvas.getContext('2d');
+
+      // White background for contain padding areas.
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvasW, canvasH);
+
+      // Draw source at native resolution centered inside the high-res canvas.
+      const drawX = (canvasW - sourceW) / 2;
+      const drawY = (canvasH - sourceH) / 2;
+      ctx.drawImage(img, drawX, drawY, sourceW, sourceH);
+
       return canvas;
     }
 
@@ -1185,7 +1226,11 @@
 
       node._srcTemplate = trimmed;
       const previewImage = await buildUrlNodePreviewImage(trimmed);
-      node.image(previewImage);
+      if (previewImage instanceof HTMLImageElement) {
+        node.image(fitImageToCanvas(previewImage, node.width(), node.height()));
+      } else {
+        node.image(previewImage);
+      }
       layer.batchDraw();
       schedulePreviewUpdate();
     }
@@ -1198,13 +1243,25 @@
 
       const previewImage = await buildUrlNodePreviewImage(urlTemplate);
       const defaultSize = 80;
+      let nodeImage = previewImage;
+      let nodeWidth = defaultSize;
+      let nodeHeight = defaultSize;
+
+      if (previewImage instanceof HTMLImageElement) {
+        const sourceW = previewImage.naturalWidth || previewImage.width || defaultSize;
+        const sourceH = previewImage.naturalHeight || previewImage.height || defaultSize;
+        const scale = Math.min(defaultSize / sourceW, defaultSize / sourceH);
+        nodeWidth = Math.max(1, Math.round(sourceW * scale));
+        nodeHeight = Math.max(1, Math.round(sourceH * scale));
+        nodeImage = fitImageToCanvas(previewImage, nodeWidth, nodeHeight);
+      }
 
       const kImg = new Konva.Image({
-        image: previewImage,
-        x: (stage.width() - defaultSize) / 2,
-        y: (stage.height() - defaultSize) / 2,
-        width: defaultSize,
-        height: defaultSize,
+        image: nodeImage,
+        x: (stage.width() - nodeWidth) / 2,
+        y: (stage.height() - nodeHeight) / 2,
+        width: nodeWidth,
+        height: nodeHeight,
         draggable: true,
       });
       kImg._isUrlNode = true;
@@ -1385,7 +1442,11 @@
 
       buildUrlNodePreviewImage(kImg._srcTemplate).then((previewImage) => {
         if (!kImg.getStage()) return;
-        kImg.image(previewImage);
+        if (previewImage instanceof HTMLImageElement) {
+          kImg.image(fitImageToCanvas(previewImage, kImg.width(), kImg.height()));
+        } else {
+          kImg.image(previewImage);
+        }
         layer.batchDraw();
         schedulePreviewUpdate();
       });
@@ -1767,13 +1828,17 @@
               imageForRow = createUrlPlaceholderImage();
             }
           }
-          node.image(imageForRow);
+          if (imageForRow instanceof HTMLImageElement) {
+            node.image(fitImageToCanvas(imageForRow, node.width(), node.height()));
+          } else {
+            node.image(imageForRow);
+          }
         }));
 
         layer.batchDraw();
 
-        // Export stage as PNG at 300 DPI (pixelRatio = 300/96)
-        const imgData = stage.toDataURL({ pixelRatio: 300 / 96 });
+        // Export stage as PNG at PDF_DPI resolution
+        const imgData = stage.toDataURL({ pixelRatio: PDF_DPI / 96 });
         doc.addImage(imgData, 'PNG', 0, 0, widthMm, heightMm);
 
         // Restore original texts
@@ -1847,7 +1912,11 @@
               imageForRow = createUrlPlaceholderImage();
             }
           }
-          node.image(imageForRow);
+          if (imageForRow instanceof HTMLImageElement) {
+            node.image(fitImageToCanvas(imageForRow, node.width(), node.height()));
+          } else {
+            node.image(imageForRow);
+          }
         }));
         layer.batchDraw();
 
