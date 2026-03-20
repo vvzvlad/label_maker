@@ -421,6 +421,14 @@
         style="background:#252525; border-color:#333; color:#e0e0e0; width:80px;"
       />
     </div>
+    <div data-align-row="" style="padding:2px 14px 8px;">
+      <label style="font-size:0.75rem; color:#bbb;">Alignment</label>
+      <div style="display:flex; gap:4px;">
+        <button id="ctx-align-left" class="btn btn-sm btn-outline-secondary" title="Left"><i class="bi bi-text-left"></i></button>
+        <button id="ctx-align-center" class="btn btn-sm btn-outline-secondary" title="Center"><i class="bi bi-text-center"></i></button>
+        <button id="ctx-align-right" class="btn btn-sm btn-outline-secondary" title="Right"><i class="bi bi-text-right"></i></button>
+      </div>
+    </div>
     <div data-stroke-row="" style="padding:2px 14px 8px;">
       <label style="font-size:0.75rem; color:#bbb;">Stroke width (px)</label>
       <input id="ctx-strokewidth" type="number" min="1" max="20" step="1"
@@ -517,7 +525,23 @@
     const ctxDelete     = document.getElementById('ctx-delete');
     const ctxFontInput  = document.getElementById('ctx-fontsize');
     const ctxStrokeInput = document.getElementById('ctx-strokewidth');
+    const ctxAlignLeft  = document.getElementById('ctx-align-left');
+    const ctxAlignCenter = document.getElementById('ctx-align-center');
+    const ctxAlignRight = document.getElementById('ctx-align-right');
     let ctxTarget       = null;
+
+    function setAlignButtonsActive(align) {
+      const value = align || 'left';
+      const buttons = [
+        { el: ctxAlignLeft, value: 'left' },
+        { el: ctxAlignCenter, value: 'center' },
+        { el: ctxAlignRight, value: 'right' },
+      ];
+      buttons.forEach(({ el, value: btnValue }) => {
+        const isActive = value === btnValue;
+        el.classList.toggle('active', isActive);
+      });
+    }
 
     /** Show context menu near the given screen position for the given node. */
     function showContextMenu(x, y, node) {
@@ -535,13 +559,23 @@
       ctxMenu.style.top = (y + mh > window.innerHeight ? y - mh : y) + 'px';
 
       const hasFontSize = cls === 'Text';
+      const hasAlign = cls === 'Text';
       const hasStrokeWidth = cls === 'Line';
       ctxMenu.querySelectorAll('[data-fontsize-row]').forEach(el => {
         el.style.display = hasFontSize ? '' : 'none';
       });
+      ctxMenu.querySelectorAll('[data-align-row]').forEach(el => {
+        el.style.display = hasAlign ? '' : 'none';
+      });
       ctxMenu.querySelectorAll('[data-stroke-row]').forEach(el => {
         el.style.display = hasStrokeWidth ? '' : 'none';
       });
+
+      if (hasAlign) {
+        setAlignButtonsActive(node.align() || 'left');
+      } else {
+        setAlignButtonsActive('left');
+      }
     }
 
     function hideContextMenu() {
@@ -584,6 +618,35 @@
       }
     });
     ctxStrokeInput.addEventListener('change', () => schedulePreviewUpdate());
+
+    // Text alignment change — apply on button click
+    ctxAlignLeft.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (ctxTarget && ctxTarget.getClassName() === 'Text') {
+        ctxTarget.align('left');
+        setAlignButtonsActive('left');
+        layer.batchDraw();
+        schedulePreviewUpdate();
+      }
+    });
+    ctxAlignCenter.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (ctxTarget && ctxTarget.getClassName() === 'Text') {
+        ctxTarget.align('center');
+        setAlignButtonsActive('center');
+        layer.batchDraw();
+        schedulePreviewUpdate();
+      }
+    });
+    ctxAlignRight.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (ctxTarget && ctxTarget.getClassName() === 'Text') {
+        ctxTarget.align('right');
+        setAlignButtonsActive('right');
+        layer.batchDraw();
+        schedulePreviewUpdate();
+      }
+    });
 
     // Hide on outside click or Escape
     document.addEventListener('click', (e) => {
@@ -732,6 +795,7 @@
               fontSize: node.fontSize(),
               fill:     node.fill(),
               width:    node.width(),
+              align:    node.align(),
             });
           } else if (cls === 'Image') {
             if (node._isQrNode) {
@@ -837,7 +901,7 @@
     /**
      * Create and register a Konva.Text node with interaction handlers.
      */
-    function addTextNodeWithProps(text, x, y, fontSize, fill, width = 200) {
+    function addTextNodeWithProps(text, x, y, fontSize, fill, width = 200, align = 'left') {
       const textNode = new Konva.Text({
         text:      text,
         x:         x,
@@ -845,6 +909,7 @@
         fontSize:  fontSize,
         fill:      fill || '#000000',
         width:     width,
+        align:     align,
         wrap:      'word',
         draggable: true,
       });
@@ -1151,7 +1216,7 @@
     function restoreSavedNodes(nodes) {
       nodes.forEach(n => {
         if (n.type === 'text') {
-          const node = addTextNodeWithProps(n.text, n.x, n.y, n.fontSize, n.fill, n.width);
+          const node = addTextNodeWithProps(n.text, n.x, n.y, n.fontSize, n.fill, n.width, n.align || 'left');
           // Restore transform attributes that Transformer may have applied
           if (n.rotation) node.rotation(n.rotation);
           if (n.scaleX   !== undefined) node.scaleX(n.scaleX);
@@ -1271,6 +1336,7 @@
             fontSize: node.fontSize(),
             fill:     node.fill(),
             width:    node.width(),
+            align:    node.align(),
           });
         } else if (cls === 'Image') {
           if (node._isQrNode) {
@@ -1349,6 +1415,7 @@
             fontSize: node.fontSize(),
             fill:     node.fill(),
             width:    node.width(),
+            align:    node.align(),
           });
         } else if (cls === 'Image') {
           if (node._isQrNode) {
