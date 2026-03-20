@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Label Maker</title>
+
+  <!-- Bootstrap 5.3 dark theme -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
+  <!-- Bootstrap Icons -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" />
+  <!-- jsPDF UMD bundle -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <!-- Konva.js canvas library -->
+  <script src="https://cdn.jsdelivr.net/npm/konva@9/konva.min.js"></script>
+
+  <style>
+    :root {
+      --bs-primary: #5A9A4A;
+      --bs-primary-rgb: 90, 154, 74;
+    }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background: #111111;
+      color: #e0e0e0;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+
+    /* ── Top bar ── */
+    .top-bar {
+      background: #1a1a1a;
+      border-bottom: 1px solid #2a2a2a;
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .top-bar .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: #e0e0e0;
+    }
+    .top-bar .brand .icon {
+      font-size: 1.4rem;
+    }
+    .top-bar .footer-text {
+      font-size: 0.78rem;
+      color: #666;
+    }
+
+    /* ── Main layout ── */
+    .main-area {
+      display: flex;
+      flex-direction: row;
+      flex: 1 1 0;
+      overflow: hidden;
+      height: calc(100vh - 57px);
+    }
+
+    /* ── Left sidebar ── */
+    .sidebar {
+      width: 380px;
+      min-width: 380px;
+      background: #1e1e1e;
+      border-right: 1px solid #2a2a2a;
+      padding: 20px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      overflow-y: auto;
+    }
+    .section-header {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #888;
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+    .sidebar .form-label {
+      font-size: 0.82rem;
+      color: #bbb;
+      margin-bottom: 4px;
+    }
+    .sidebar .form-control,
+    .sidebar .form-select {
+      background: #252525;
+      border-color: #333;
+      color: #e0e0e0;
+      font-size: 0.88rem;
+    }
+    .sidebar .form-control:focus,
+    .sidebar .form-select:focus {
+      background: #2a2a2a;
+      border-color: #5A9A4A;
+      color: #e0e0e0;
+      box-shadow: 0 0 0 0.2rem rgba(90,154,74,0.25);
+    }
+    .sidebar textarea.form-control {
+      resize: vertical;
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 0.85rem;
+    }
+
+    /* ── Buttons ── */
+    .btn-generate {
+      background: #5A9A4A;
+      border-color: #5A9A4A;
+      color: #fff;
+      font-weight: 500;
+    }
+    .btn-generate:hover {
+      background: #4e8840;
+      border-color: #4e8840;
+      color: #fff;
+    }
+    .btn-generate:focus {
+      box-shadow: 0 0 0 0.2rem rgba(90,154,74,0.4);
+    }
+    .counter-text {
+      font-size: 0.78rem;
+      color: #666;
+    }
+
+    /* ── Right preview panel ── */
+    .preview-panel {
+      flex: 1 1 0;
+      background: #111111;
+      padding: 20px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      overflow: auto;
+    }
+
+    .template-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 0;
+      flex-shrink: 0;
+    }
+    .template-toolbar .form-label {
+      font-size: 0.82rem;
+      color: #bbb;
+      margin: 0;
+      white-space: nowrap;
+    }
+    .template-toolbar .form-control,
+    .template-toolbar .form-select {
+      background: #252525;
+      border-color: #333;
+      color: #e0e0e0;
+      font-size: 0.82rem;
+    }
+
+    /* ── Konva stage wrapper ── */
+    #konva-stage-wrap {
+      flex: 1 1 0;
+      background: #2a2a2a;
+      border-radius: 4px;
+      overflow: auto;
+      min-height: 0;
+      position: relative;
+      padding: 16px;
+    }
+    #konva-scale-wrap {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      transform-origin: top left;
+    }
+    #konva-container {
+      /* Sized dynamically to match label pixel dimensions */
+    }
+
+    .preview-section {
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .preview-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    #preview-strip {
+      display: none;
+      flex-direction: row;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 8px;
+      background: #1a1a1a;
+      border-radius: 4px;
+      min-height: 120px;
+      align-items: flex-start;
+    }
+    .preview-thumb {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+    .preview-thumb img {
+      border-radius: 2px;
+      border: 1px solid #333;
+      height: 100px;
+      width: auto;
+    }
+    .preview-thumb span {
+      font-size: 0.65rem;
+      color: #888;
+      max-width: 120px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* ── Toast ── */
+    .toast-container {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 9999;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top bar -->
+  <div class="top-bar">
+    <div class="brand">
+      <span class="icon">🏷️</span>
+      <span>Label Maker</span>
+    </div>
+    <div class="footer-text">Developed by Asakusa Lab</div>
+  </div>
+
+  <!-- Main area -->
+  <div class="main-area">
+
+    <!-- Left sidebar: settings + input -->
+    <div class="sidebar">
+      <div class="section-header">Settings</div>
+
+      <!-- Width / Height row -->
+      <div class="row g-2">
+        <div class="col">
+          <label class="form-label" for="input-width">Width (mm)</label>
+          <input type="number" id="input-width" class="form-control" value="58" min="1" step="1" />
+        </div>
+        <div class="col">
+          <label class="form-label" for="input-height">Height (mm)</label>
+          <input type="number" id="input-height" class="form-control" value="40" min="1" step="1" />
+        </div>
+      </div>
+
+      <!-- Labels textarea -->
+      <div style="flex:1;">
+        <label class="form-label" for="input-labels">Labels (one per line)</label>
+        <textarea
+          id="input-labels"
+          class="form-control"
+          rows="12"
+          placeholder="Label 1&#10;Label 2&#10;Label 3&#10;..."
+        ></textarea>
+      </div>
+
+      <!-- Generate / Clear buttons -->
+      <div class="d-flex gap-2">
+        <button id="btn-generate" class="btn btn-generate flex-fill" onclick="generatePDF()">
+          <i class="bi bi-file-earmark-pdf me-1"></i> Generate PDF
+        </button>
+        <button class="btn btn-outline-secondary" onclick="clearLabels()">
+          <i class="bi bi-x-lg me-1"></i> Clear
+        </button>
+      </div>
+
+      <!-- Counter -->
+      <div class="counter-text" id="label-counter">0 labels loaded</div>
+    </div>
+
+    <!-- Right panel: Konva template editor -->
+    <div class="preview-panel">
+      <div class="template-toolbar">
+        <div class="section-header" style="margin:0;">Template Editor</div>
+        <div class="d-flex align-items-center gap-2">
+          <label class="form-label" style="margin:0; font-size:0.82rem; color:#bbb; white-space:nowrap;">Font size (px)</label>
+          <input type="number" id="input-fontsize" class="form-control form-control-sm" value="20" min="1" step="1" style="width:68px;" />
+          <button id="btn-add-text" class="btn btn-outline-secondary btn-sm" onclick="addTextNode()">
+            <i class="bi bi-plus-lg me-1"></i>Add Text
+          </button>
+          <button id="btn-delete-selected" class="btn btn-outline-danger btn-sm" onclick="deleteSelected()">
+            <i class="bi bi-trash me-1"></i>Delete
+          </button>
+          <select id="input-zoom" class="form-select form-select-sm" style="width:80px;" onchange="applyZoom()">
+            <option value="50">50%</option>
+            <option value="75">75%</option>
+            <option value="100" selected>100%</option>
+            <option value="150">150%</option>
+            <option value="200">200%</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="konva-stage-wrap">
+        <div id="zoom-spacer" style="position:relative;">
+          <div id="konva-scale-wrap">
+            <div id="konva-container"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="preview-section">
+        <div class="preview-header">
+          <div class="section-header" style="margin:0;">Label Previews</div>
+          <button class="btn btn-outline-secondary btn-sm" onclick="renderPreviewStrip()">
+            <i class="bi bi-eye me-1"></i>Preview
+          </button>
+        </div>
+        <div id="preview-strip"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Toast container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Bootstrap JS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+  <script>
+    // ── DOM references ──────────────────────────────────────────────
+    const inputLabels   = document.getElementById('input-labels');
+    const inputWidth    = document.getElementById('input-width');
+    const inputHeight   = document.getElementById('input-height');
+    const inputFontsize = document.getElementById('input-fontsize');
+    const labelCounter  = document.getElementById('label-counter');
+
+    // ── Konva state ─────────────────────────────────────────────────
+    const PX_PER_MM = 96 / 25.4; // 96 DPI screen resolution
+
+    let stage       = null;
+    let layer       = null;
+    let transformer = null;
+    let bgRect      = null;
+
+    function applyZoom() {
+      const zoom = parseInt(document.getElementById('input-zoom').value, 10) / 100;
+      const stageW = stage.width();
+      const stageH = stage.height();
+      const zoomSpacer = document.getElementById('zoom-spacer');
+      const scaleWrap = document.getElementById('konva-scale-wrap');
+      zoomSpacer.style.width = (stageW * zoom) + 'px';
+      zoomSpacer.style.height = (stageH * zoom) + 'px';
+      scaleWrap.style.transform = `scale(${zoom})`;
+    }
+
+    // ── Helpers ─────────────────────────────────────────────────────
+
+    /** Return array of non-empty label lines. */
+    function getLines() {
+      return inputLabels.value.split('\n').filter(l => l.trim() !== '');
+    }
+
+    /** Update the label count display. */
+    function updateCounter() {
+      const n = getLines().length;
+      labelCounter.textContent = n === 1 ? '1 label loaded' : `${n} labels loaded`;
+    }
+
+    /** Show a Bootstrap Toast with the given message. */
+    function showToast(message, variant = 'danger') {
+      const container = document.getElementById('toast-container');
+      const id = 'toast-' + Date.now();
+      const html = `
+        <div id="${id}" class="toast align-items-center text-bg-${variant} border-0" role="alert" aria-live="assertive" aria-atomic="true">
+          <div class="d-flex">
+            <div class="toast-body">${message}</div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+          </div>
+        </div>`;
+      container.insertAdjacentHTML('beforeend', html);
+      const el = document.getElementById(id);
+      const toast = new bootstrap.Toast(el, { delay: 4000 });
+      toast.show();
+      el.addEventListener('hidden.bs.toast', () => el.remove());
+    }
+
+    // ── Konva stage initialization ───────────────────────────────────
+
+    /**
+     * Initialize (or reinitialize) the Konva stage with the current mm dimensions.
+     * Existing text nodes are preserved when re-creating the stage.
+     */
+    function initStage() {
+      const widthMm  = parseFloat(inputWidth.value)  || 58;
+      const heightMm = parseFloat(inputHeight.value) || 40;
+      const stageW   = Math.round(widthMm  * PX_PER_MM);
+      const stageH   = Math.round(heightMm * PX_PER_MM);
+
+      // Collect existing text nodes before destroying stage
+      const savedNodes = [];
+      if (layer) {
+        layer.getChildren().forEach(node => {
+          if (node.getClassName() === 'Text') {
+            savedNodes.push({
+              text:     node.text(),
+              x:        node.x(),
+              y:        node.y(),
+              fontSize: node.fontSize(),
+              fill:     node.fill(),
+            });
+          }
+        });
+      }
+
+      // Destroy old stage if present
+      if (stage) {
+        stage.destroy();
+        stage = null;
+        layer = null;
+        transformer = null;
+        bgRect = null;
+      }
+
+      // Create new stage
+      stage = new Konva.Stage({
+        container: 'konva-container',
+        width:  stageW,
+        height: stageH,
+      });
+
+      layer = new Konva.Layer();
+      stage.add(layer);
+
+      // White background rect (non-interactive)
+      bgRect = new Konva.Rect({
+        x: 0,
+        y: 0,
+        width:  stageW,
+        height: stageH,
+        fill:   '#ffffff',
+        listening: false,
+      });
+      layer.add(bgRect);
+
+      // Shared transformer for selection handles
+      transformer = new Konva.Transformer({
+        enabledAnchors: ['top-left', 'top-right', 'bottom-left', 'bottom-right'],
+        boundBoxFunc: (oldBox, newBox) => newBox,
+      });
+      layer.add(transformer);
+
+      // Restore previously saved text nodes
+      savedNodes.forEach(n => addTextNodeWithProps(n.text, n.x, n.y, n.fontSize, n.fill));
+
+      // Deselect when clicking on empty stage area
+      stage.on('click tap', (e) => {
+        if (e.target === stage || e.target === bgRect) {
+          transformer.nodes([]);
+          layer.batchDraw();
+        }
+      });
+
+      layer.batchDraw();
+      applyZoom();
+    }
+
+    // ── Text node creation ───────────────────────────────────────────
+
+    /**
+     * Create and register a Konva.Text node with interaction handlers.
+     */
+    function addTextNodeWithProps(text, x, y, fontSize, fill) {
+      const textNode = new Konva.Text({
+        text:      text,
+        x:         x,
+        y:         y,
+        fontSize:  fontSize,
+        fill:      fill || '#000000',
+        draggable: true,
+      });
+
+      layer.add(textNode);
+
+      // Single click → select (attach transformer)
+      textNode.on('click tap', (e) => {
+        e.cancelBubble = true;
+        transformer.nodes([textNode]);
+        layer.batchDraw();
+      });
+
+      // Double-click → in-place textarea editing
+      textNode.on('dblclick dbltap', () => {
+        startTextEdit(textNode);
+      });
+
+      layer.batchDraw();
+      return textNode;
+    }
+
+    // ── In-place text editing ────────────────────────────────────────
+
+    /**
+     * Show a <textarea> overlay positioned and styled to match the given text node,
+     * allowing the user to edit its content in-place.
+     * On blur or Enter (not Shift+Enter): commit changes and remove textarea.
+     */
+    function startTextEdit(textNode) {
+      // Hide the node while editing
+      textNode.hide();
+      transformer.nodes([]);
+      layer.batchDraw();
+
+      // Determine absolute position on screen, accounting for CSS zoom applied to #konva-scale-wrap
+      const stageBox    = stage.container().getBoundingClientRect();
+      const absPos      = textNode.getAbsolutePosition();
+      // CSS zoom factor from the zoom selector (not Konva's own scale, which stays at 1)
+      const cssZoom     = parseInt(document.getElementById('input-zoom').value, 10) / 100;
+
+      const textarea = document.createElement('textarea');
+      document.body.appendChild(textarea);
+
+      textarea.value = textNode.text();
+      textarea.style.position   = 'fixed';
+      textarea.style.top        = (stageBox.top  + absPos.y * cssZoom) + 'px';
+      textarea.style.left       = (stageBox.left + absPos.x * cssZoom) + 'px';
+      textarea.style.fontSize   = (textNode.fontSize() * cssZoom) + 'px';
+      textarea.style.color      = textNode.fill();
+      textarea.style.background = 'rgba(255,255,255,0.92)';
+      textarea.style.border     = '1px solid #5A9A4A';
+      textarea.style.borderRadius = '2px';
+      textarea.style.padding    = '2px 4px';
+      textarea.style.margin     = '0';
+      textarea.style.lineHeight = '1.2';
+      textarea.style.fontFamily = 'sans-serif';
+      textarea.style.minWidth   = '60px';
+      textarea.style.outline    = 'none';
+      textarea.style.resize     = 'none';
+      textarea.style.overflow   = 'hidden';
+      textarea.style.zIndex     = '10000';
+      textarea.style.whiteSpace = 'nowrap';
+
+      // Auto-size textarea width/height to content
+      function resize() {
+        textarea.style.width  = 'auto';
+        textarea.style.height = 'auto';
+        textarea.style.width  = textarea.scrollWidth  + 'px';
+        textarea.style.height = textarea.scrollHeight + 'px';
+      }
+      resize();
+      textarea.addEventListener('input', resize);
+
+      textarea.focus();
+      textarea.select();
+
+      let committed = false;
+
+      function commit() {
+        if (committed) return;
+        committed = true;
+
+        const newText = textarea.value.trim() !== '' ? textarea.value : textNode.text();
+        textNode.text(newText);
+        textNode.show();
+        transformer.nodes([textNode]);
+        layer.batchDraw();
+        textarea.remove();
+      }
+
+      textarea.addEventListener('blur', commit);
+
+      textarea.addEventListener('keydown', (e) => {
+        // Enter without Shift commits; Shift+Enter inserts a newline
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          textarea.blur();
+        }
+        // Escape cancels — restore original text
+        if (e.key === 'Escape') {
+          committed = true;
+          textNode.show();
+          transformer.nodes([textNode]);
+          layer.batchDraw();
+          textarea.remove();
+        }
+      });
+    }
+
+    // ── Add / Delete text node buttons ───────────────────────────────
+
+    /** Add a new text node at the centre of the stage. */
+    function addTextNode() {
+      const fontSize = parseInt(inputFontsize.value, 10) || 20;
+      const cx = stage.width()  / 2;
+      const cy = stage.height() / 2;
+      const node = addTextNodeWithProps('New text', cx - 30, cy - fontSize / 2, fontSize, '#000000');
+      // Select the newly created node
+      transformer.nodes([node]);
+      layer.batchDraw();
+    }
+
+    /** Delete the currently selected text node. */
+    function deleteSelected() {
+      const nodes = transformer.nodes();
+      if (nodes.length === 0) {
+        showToast('No element selected. Click a text element to select it first.', 'warning');
+        return;
+      }
+      nodes.forEach(n => n.destroy());
+      transformer.nodes([]);
+      layer.batchDraw();
+    }
+
+    // ── PDF generation ───────────────────────────────────────────────
+
+    /**
+     * Generate a PDF with one label per page.
+     * Placeholders matching %%ANYTHING%% in text nodes are replaced per label line.
+     * The stage is exported as a PNG via stage.toDataURL() at 300 DPI equivalent.
+     */
+    function generatePDF() {
+      const lines = getLines();
+      if (lines.length === 0) {
+        showToast('No labels to generate. Paste at least one line first.', 'danger');
+        return;
+      }
+
+      const widthMm  = parseFloat(inputWidth.value)  || 58;
+      const heightMm = parseFloat(inputHeight.value) || 40;
+
+      const isLandscape = widthMm > heightMm;
+      const orientation = isLandscape ? 'landscape' : 'portrait';
+
+      const doc = new window.jspdf.jsPDF({
+        orientation,
+        unit: 'mm',
+        format: [widthMm, heightMm],
+      });
+
+      // Collect all text nodes (skip background rect and transformer)
+      const textNodes = layer.getChildren().filter(n => n.getClassName() === 'Text');
+
+      // Regex to detect placeholder pattern %%SOMETHING%%
+      const placeholderRe = /^%%[^%]+%%$/;
+
+      // Remember original texts for restoration after each export
+      const originalTexts = textNodes.map(n => n.text());
+
+      // Detach transformer so it doesn't appear in exported image
+      const prevSelected = transformer.nodes().slice();
+      transformer.nodes([]);
+
+      lines.forEach((labelLine, idx) => {
+        if (idx > 0) doc.addPage([widthMm, heightMm], orientation);
+
+        // Substitute placeholders
+        textNodes.forEach((node, ni) => {
+          if (placeholderRe.test(originalTexts[ni])) {
+            node.text(labelLine);
+          }
+        });
+
+        layer.batchDraw();
+
+        // Export stage as PNG at 300 DPI (pixelRatio = 300/96)
+        const imgData = stage.toDataURL({ pixelRatio: 300 / 96 });
+        doc.addImage(imgData, 'PNG', 0, 0, widthMm, heightMm);
+
+        // Restore original texts
+        textNodes.forEach((node, ni) => node.text(originalTexts[ni]));
+      });
+
+      // Restore transformer selection
+      transformer.nodes(prevSelected);
+      layer.batchDraw();
+
+      doc.save('labels.pdf');
+      showToast(`PDF with ${lines.length} label${lines.length > 1 ? 's' : ''} generated!`, 'success');
+    }
+
+    function renderPreviewStrip() {
+      const lines = getLines();
+      const strip = document.getElementById('preview-strip');
+      strip.innerHTML = '';
+      strip.style.display = 'flex';
+
+      if (lines.length === 0) {
+        strip.innerHTML = '<span style="color:#666; font-size:0.82rem; padding:8px;">No labels — paste at least one line.</span>';
+        return;
+      }
+
+      const textNodes = layer.getChildren().filter(n => n.getClassName() === 'Text');
+      const originalTexts = textNodes.map(n => n.text());
+      const placeholderRe = /^%%[^%]+%%$/;
+
+      // Temporarily detach transformer
+      const prevSelected = transformer.nodes().slice();
+      transformer.nodes([]);
+
+      lines.forEach((labelLine) => {
+        // Substitute placeholders
+        textNodes.forEach((node, ni) => {
+          if (placeholderRe.test(originalTexts[ni])) node.text(labelLine);
+        });
+        layer.batchDraw();
+
+        // Render thumbnail at reduced resolution (target ~100px height)
+        const thumbScale = 100 / stage.height();
+        const dataUrl = stage.toDataURL({ pixelRatio: thumbScale });
+
+        // Restore texts immediately
+        textNodes.forEach((node, ni) => node.text(originalTexts[ni]));
+
+        // Create thumbnail element
+        const wrapper = document.createElement('div');
+        wrapper.className = 'preview-thumb';
+        const img = document.createElement('img');
+        img.src = dataUrl;
+        const label = document.createElement('span');
+        label.textContent = labelLine;
+        wrapper.appendChild(img);
+        wrapper.appendChild(label);
+        strip.appendChild(wrapper);
+      });
+
+      // Restore transformer
+      transformer.nodes(prevSelected);
+      layer.batchDraw();
+    }
+
+    // ── Clear ────────────────────────────────────────────────────────
+
+    /** Clear all label text and reset counter. */
+    function clearLabels() {
+      inputLabels.value = '';
+      updateCounter();
+    }
+
+    // ── Stage resize on mm-input change ──────────────────────────────
+
+    function handleDimensionChange() {
+      const widthMm  = parseFloat(inputWidth.value)  || 58;
+      const heightMm = parseFloat(inputHeight.value) || 40;
+      const newW = Math.round(widthMm  * PX_PER_MM);
+      const newH = Math.round(heightMm * PX_PER_MM);
+      stage.width(newW);
+      stage.height(newH);
+      bgRect.width(newW);
+      bgRect.height(newH);
+      layer.batchDraw();
+      applyZoom();
+    }
+
+    // ── Event listeners ──────────────────────────────────────────────
+
+    inputLabels.addEventListener('input', updateCounter);
+
+    inputWidth.addEventListener('input',  handleDimensionChange);
+    inputHeight.addEventListener('input', handleDimensionChange);
+
+    // ── Initialise ───────────────────────────────────────────────────
+
+    updateCounter();
+    initStage();
+
+    // Add a default placeholder text node so users see an example
+    addTextNodeWithProps('%%ENTITY1%%', 10, 10, parseInt(inputFontsize.value, 10) || 20, '#000000');
+    transformer.nodes([]);
+    layer.batchDraw();
+  </script>
+</body>
+</html>
