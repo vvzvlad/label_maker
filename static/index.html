@@ -13,6 +13,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <!-- Konva.js canvas library -->
   <script src="https://cdn.jsdelivr.net/npm/konva@9/konva.min.js"></script>
+  <!-- QRious QR code generator -->
+  <script src="https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js"></script>
 
   <style>
     :root {
@@ -66,8 +68,8 @@
 
     /* ── Left sidebar ── */
     .sidebar {
-      width: 760px;
-      min-width: 760px;
+      width: 610px;
+      min-width: 610px;
       background: #1e1e1e;
       border-right: 1px solid #2a2a2a;
       padding: 20px 18px;
@@ -122,12 +124,14 @@
       top: 0;
       background: #202020;
       color: #bcbcbc;
-      border-color: #333;
+      border-color: #444;
+      border-right: 1px solid #444;
       padding: 3px 4px;
       white-space: nowrap;
     }
     .entities-table td {
-      border-color: #333;
+      border-color: #444;
+      border-right: 1px solid #444;
       padding: 0;
       background: #252525;
       vertical-align: middle;
@@ -269,6 +273,11 @@
       text-overflow: ellipsis;
     }
 
+    /* ── Zoom range slider ── */
+    #input-zoom {
+      accent-color: #5A9A4A;
+    }
+
     /* ── Toast ── */
     .toast-container {
       position: fixed;
@@ -359,31 +368,23 @@
         <div class="section-header" style="margin:0;">Template Editor</div>
         <div class="d-flex align-items-center gap-2">
           <button id="btn-add-text" class="btn btn-outline-secondary btn-sm" onclick="addTextNode()">
-            <i class="bi bi-plus-lg me-1"></i>Add Text
+            <i class="bi bi-fonts me-1"></i>Text
           </button>
           <button class="btn btn-outline-secondary btn-sm" onclick="document.getElementById('img-upload').click()">
-            <i class="bi bi-image me-1"></i>Add Image
+            <i class="bi bi-image me-1"></i>Image
           </button>
           <input type="file" id="img-upload" accept="image/*" style="display:none" onchange="addImageNode(this)" />
           <button class="btn btn-outline-secondary btn-sm" onclick="addLineNode()">
-            <i class="bi bi-slash-lg me-1"></i>Add Line
+            <i class="bi bi-slash-lg me-1"></i>Line
+          </button>
+          <button class="btn btn-outline-secondary btn-sm" onclick="addQrNode()">
+            <i class="bi bi-qr-code me-1"></i>QR
           </button>
           <button id="btn-reset-template" class="btn btn-outline-danger btn-sm" type="button">
             <i class="bi bi-arrow-counterclockwise me-1"></i>Reset Template
           </button>
-          <select id="input-zoom" class="form-select form-select-sm" style="width:80px;" onchange="applyZoom()">
-            <option value="25">25%</option>
-            <option value="50">50%</option>
-            <option value="75">75%</option>
-            <option value="100">100%</option>
-            <option value="150">150%</option>
-            <option value="200" selected>200%</option>
-            <option value="300">300%</option>
-            <option value="400">400%</option>
-            <option value="500">500%</option>
-            <option value="750">750%</option>
-            <option value="1000">1000%</option>
-          </select>
+          <span id="zoom-label" style="font-size:0.82rem; color:#bbb; min-width:42px; text-align:right; flex-shrink:0;">200%</span>
+          <input type="range" id="input-zoom" min="10" max="400" value="200" step="10" style="width:90px; flex-shrink:0;" oninput="applyZoom()" />
         </div>
       </div>
 
@@ -593,7 +594,9 @@
     });
 
     function applyZoom() {
-      const zoom = parseInt(document.getElementById('input-zoom').value, 10) / 100;
+      const pct = parseInt(document.getElementById('input-zoom').value, 10);
+      const zoom = pct / 100;
+      document.getElementById('zoom-label').textContent = pct + '%';
       const stageW = stage.width();
       const stageH = stage.height();
       const zoomSpacer = document.getElementById('zoom-spacer');
@@ -605,6 +608,20 @@
 
     // ── Helpers ─────────────────────────────────────────────────────
 
+    // Generate a QR code data URL for the given text at the given pixel size
+    function generateQrDataUrl(text, size) {
+      const canvas = document.createElement('canvas');
+      new QRious({ element: canvas, value: text || ' ', size: size });
+      return canvas.toDataURL();
+    }
+
+    // Load a dataURL as an HTMLImageElement; calls onLoad(imgEl) when ready
+    function loadImage(dataUrl, onLoad) {
+      const img = new Image();
+      img.onload = () => onLoad(img);
+      img.src = dataUrl;
+    }
+
     /** Append a new entity row to the entities table. */
     function addEntityRow(e1 = '', e2 = '', e3 = '') {
       const tbody = document.getElementById('entities-tbody');
@@ -614,7 +631,7 @@
         <td><input type="text" class="entity-input form-control form-control-sm" value="${e2}" /></td>
         <td><input type="text" class="entity-input form-control form-control-sm" value="${e3}" /></td>
         <td class="text-center">
-          <button type="button" class="btn btn-outline-danger btn-sm btn-delete-row" title="Delete row" aria-label="Delete row">
+          <button type="button" class="btn btn-danger btn-sm btn-delete-row" title="Delete row" aria-label="Delete row">
             <i class="bi bi-trash"></i>
           </button>
         </td>
@@ -717,17 +734,31 @@
               width:    node.width(),
             });
           } else if (cls === 'Image') {
-            savedNodes.push({
-              type:     'image',
-              x:        node.x(),
-              y:        node.y(),
-              rotation: node.rotation(),
-              scaleX:   node.scaleX(),
-              scaleY:   node.scaleY(),
-              width:    node.width(),
-              height:   node.height(),
-              src:      node._srcDataUrl,
-            });
+            if (node._isQrNode) {
+              savedNodes.push({
+                type:     'qr',
+                x:        node.x(),
+                y:        node.y(),
+                rotation: node.rotation(),
+                scaleX:   node.scaleX(),
+                scaleY:   node.scaleY(),
+                width:    node.width(),
+                height:   node.height(),
+                content:  node._qrContent,
+              });
+            } else {
+              savedNodes.push({
+                type:     'image',
+                x:        node.x(),
+                y:        node.y(),
+                rotation: node.rotation(),
+                scaleX:   node.scaleX(),
+                scaleY:   node.scaleY(),
+                width:    node.width(),
+                height:   node.height(),
+                src:      node._srcDataUrl,
+              });
+            }
           } else if (cls === 'Line') {
             savedNodes.push({
               type:        'line',
@@ -1018,6 +1049,68 @@
       reader.readAsDataURL(file);
     }
 
+    function attachQrNodeHandlers(qrNode) {
+      qrNode.on('click tap', (ev) => {
+        ev.cancelBubble = true;
+        transformer.enabledAnchors(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
+        transformer.nodes([qrNode]);
+        layer.batchDraw();
+      });
+
+      qrNode.on('dblclick dbltap', () => {
+        const newContent = window.prompt('QR code content:', qrNode._qrContent);
+        if (newContent === null || newContent === '') return;
+
+        qrNode._qrContent = newContent;
+
+        // Render at high resolution for crisp display; Konva.Image scales it down to node dimensions
+        const qrCanvas = document.createElement('canvas');
+        new QRious({ element: qrCanvas, value: qrNode._qrContent || ' ', size: 512 });
+        qrNode.image(qrCanvas);
+
+        layer.batchDraw();
+        schedulePreviewUpdate();
+      });
+
+      qrNode.on('contextmenu', (ev) => {
+        ev.evt.preventDefault();
+        transformer.enabledAnchors(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
+        transformer.nodes([qrNode]);
+        layer.batchDraw();
+        showContextMenu(ev.evt.clientX, ev.evt.clientY, qrNode);
+      });
+
+      qrNode.on('dragend', schedulePreviewUpdate);
+    }
+
+    function addQrNode() {
+      const defaultContent = '%E1%';
+      const defaultSize = 80; // display size in px on canvas
+      // Render at 512px for crispness; Konva.Image will scale it to defaultSize for display
+      const dataUrl = generateQrDataUrl(defaultContent, 512);
+
+      loadImage(dataUrl, (imgEl) => {
+        const qrNode = new Konva.Image({
+          image: imgEl,
+          x: (stage.width() - defaultSize) / 2,
+          y: (stage.height() - defaultSize) / 2,
+          width: defaultSize,
+          height: defaultSize,
+          draggable: true,
+        });
+
+        qrNode._isQrNode = true;
+        qrNode._qrContent = defaultContent;
+        layer.add(qrNode);
+        attachQrNodeHandlers(qrNode);
+
+        transformer.enabledAnchors(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
+        transformer.nodes([qrNode]);
+        layer.batchDraw();
+        schedulePreviewUpdate();
+      });
+    }
+
     function addLineNode() {
       const cx = stage.width() / 2;
       const cy = stage.height() / 2;
@@ -1098,6 +1191,32 @@
             schedulePreviewUpdate();
           };
           imgEl.src = n.src;
+        } else if (n.type === 'qr') {
+          const qrWidth = n.width || 80;
+          const qrHeight = n.height || 80;
+          const qrContent = n.content || '%E1%';
+          // Always render at high resolution; Konva.Image scales to qrWidth/qrHeight for display
+          const dataUrl = generateQrDataUrl(qrContent, 512);
+
+          loadImage(dataUrl, (imgEl) => {
+            const qrNode = new Konva.Image({
+              image:    imgEl,
+              x:        n.x,
+              y:        n.y,
+              width:    qrWidth,
+              height:   qrHeight,
+              rotation: n.rotation || 0,
+              scaleX:   n.scaleX   !== undefined ? n.scaleX : 1,
+              scaleY:   n.scaleY   !== undefined ? n.scaleY : 1,
+              draggable: true,
+            });
+            qrNode._isQrNode = true;
+            qrNode._qrContent = qrContent;
+            layer.add(qrNode);
+            attachQrNodeHandlers(qrNode);
+            layer.batchDraw();
+            schedulePreviewUpdate();
+          });
         } else if (n.type === 'line') {
           const line = new Konva.Line({
             points:      n.points,
@@ -1154,17 +1273,31 @@
             width:    node.width(),
           });
         } else if (cls === 'Image') {
-          nodes.push({
-            type:     'image',
-            x:        node.x(),
-            y:        node.y(),
-            rotation: node.rotation(),
-            scaleX:   node.scaleX(),
-            scaleY:   node.scaleY(),
-            width:    node.width(),
-            height:   node.height(),
-            src:      node._srcDataUrl,
-          });
+          if (node._isQrNode) {
+            nodes.push({
+              type:     'qr',
+              x:        node.x(),
+              y:        node.y(),
+              rotation: node.rotation(),
+              scaleX:   node.scaleX(),
+              scaleY:   node.scaleY(),
+              width:    node.width(),
+              height:   node.height(),
+              content:  node._qrContent,
+            });
+          } else {
+            nodes.push({
+              type:     'image',
+              x:        node.x(),
+              y:        node.y(),
+              rotation: node.rotation(),
+              scaleX:   node.scaleX(),
+              scaleY:   node.scaleY(),
+              width:    node.width(),
+              height:   node.height(),
+              src:      node._srcDataUrl,
+            });
+          }
         } else if (cls === 'Line') {
           nodes.push({
             type:        'line',
@@ -1184,6 +1317,7 @@
         version: 1,
         widthMm: parseFloat(inputWidth.value) || 58,
         heightMm: parseFloat(inputHeight.value) || 40,
+        zoom: parseInt(document.getElementById('input-zoom').value, 10) || 200,
         nodes,
       };
       const blob = new Blob([JSON.stringify(tpl, null, 2)], { type: 'application/json' });
@@ -1217,17 +1351,31 @@
             width:    node.width(),
           });
         } else if (cls === 'Image') {
-          nodes.push({
-            type:     'image',
-            x:        node.x(),
-            y:        node.y(),
-            rotation: node.rotation(),
-            scaleX:   node.scaleX(),
-            scaleY:   node.scaleY(),
-            width:    node.width(),
-            height:   node.height(),
-            src:      node._srcDataUrl,
-          });
+          if (node._isQrNode) {
+            nodes.push({
+              type:     'qr',
+              x:        node.x(),
+              y:        node.y(),
+              rotation: node.rotation(),
+              scaleX:   node.scaleX(),
+              scaleY:   node.scaleY(),
+              width:    node.width(),
+              height:   node.height(),
+              content:  node._qrContent,
+            });
+          } else {
+            nodes.push({
+              type:     'image',
+              x:        node.x(),
+              y:        node.y(),
+              rotation: node.rotation(),
+              scaleX:   node.scaleX(),
+              scaleY:   node.scaleY(),
+              width:    node.width(),
+              height:   node.height(),
+              src:      node._srcDataUrl,
+            });
+          }
         } else if (cls === 'Line') {
           nodes.push({
             type:        'line',
@@ -1247,6 +1395,7 @@
         version: 1,
         widthMm: parseFloat(inputWidth.value) || 58,
         heightMm: parseFloat(inputHeight.value) || 40,
+        zoom: parseInt(document.getElementById('input-zoom').value, 10) || 200,
         nodes,
       };
       localStorage.setItem('lm_template', JSON.stringify(tpl));
@@ -1264,6 +1413,10 @@
 
           if (tpl.widthMm) inputWidth.value = tpl.widthMm;
           if (tpl.heightMm) inputHeight.value = tpl.heightMm;
+          if (tpl.zoom) {
+            document.getElementById('input-zoom').value = tpl.zoom;
+            document.getElementById('zoom-label').textContent = tpl.zoom + '%';
+          }
 
           initStage(false);
           restoreSavedNodes(tpl.nodes);
@@ -1307,9 +1460,11 @@
 
       // Collect all text nodes (skip background rect and transformer)
       const textNodes = layer.getChildren().filter(n => n.getClassName() === 'Text');
+      const qrNodes = layer.getChildren().filter(n => n._isQrNode === true);
 
       // Remember original texts for restoration after each export
       const originalTexts = textNodes.map(n => n.text());
+      const originalQrImages = qrNodes.map(n => n.image());
 
       // Detach transformer so it doesn't appear in exported image
       const prevSelected = transformer.nodes().slice();
@@ -1330,6 +1485,19 @@
           node.text(t);
         });
 
+        // Substitute placeholders in QR content and regenerate QR image synchronously
+        qrNodes.forEach((node) => {
+          let content = node._qrContent || '';
+          content = content.replace(/%E1%/g, row.entity1.replace(/\\n/g, '\n'));
+          content = content.replace(/%E2%/g, row.entity2.replace(/\\n/g, '\n'));
+          content = content.replace(/%E3%/g, row.entity3.replace(/\\n/g, '\n'));
+
+          // Render QR at high resolution so it stays sharp in high-DPI PDF export
+          const qrCanvas = document.createElement('canvas');
+          new QRious({ element: qrCanvas, value: content || ' ', size: 512 });
+          node.image(qrCanvas);
+        });
+
         layer.batchDraw();
 
         // Export stage as PNG at 300 DPI (pixelRatio = 300/96)
@@ -1338,6 +1506,7 @@
 
         // Restore original texts
         textNodes.forEach((node, ni) => node.text(originalTexts[ni]));
+        qrNodes.forEach((node, ni) => node.image(originalQrImages[ni]));
       });
 
       // Restore transformer selection
@@ -1367,6 +1536,8 @@
 
       const textNodes = layer.getChildren().filter(n => n.getClassName() === 'Text');
       const originalTexts = textNodes.map(n => n.text());
+      const qrNodes = layer.getChildren().filter(n => n._isQrNode === true);
+      const originalQrImages = qrNodes.map(n => n.image());
 
       // Temporarily detach transformer
       const prevSelected = transformer.nodes().slice();
@@ -1384,6 +1555,19 @@
           t = t.replace(/%E3%/g, row.entity3.replace(/\\n/g, '\n'));
           node.text(t);
         });
+
+        // Substitute placeholders in QR content and regenerate QR image synchronously
+        qrNodes.forEach((node) => {
+          let content = node._qrContent || '';
+          content = content.replace(/%E1%/g, row.entity1.replace(/\\n/g, '\n'));
+          content = content.replace(/%E2%/g, row.entity2.replace(/\\n/g, '\n'));
+          content = content.replace(/%E3%/g, row.entity3.replace(/\\n/g, '\n'));
+
+          // Render QR at high resolution for crisp preview thumbnails
+          const qrCanvas = document.createElement('canvas');
+          new QRious({ element: qrCanvas, value: content || ' ', size: 512 });
+          node.image(qrCanvas);
+        });
         layer.batchDraw();
 
         // Render thumbnail at reduced resolution (target ~100px height)
@@ -1392,6 +1576,7 @@
 
         // Restore texts immediately
         textNodes.forEach((node, ni) => node.text(originalTexts[ni]));
+        qrNodes.forEach((node, ni) => node.image(originalQrImages[ni]));
 
         // Create thumbnail element
         const wrapper = document.createElement('div');
@@ -1524,6 +1709,10 @@
         const tpl = JSON.parse(savedTemplateRaw);
         if (tpl.widthMm) inputWidth.value = tpl.widthMm;
         if (tpl.heightMm) inputHeight.value = tpl.heightMm;
+        if (tpl.zoom) {
+          document.getElementById('input-zoom').value = tpl.zoom;
+          document.getElementById('zoom-label').textContent = tpl.zoom + '%';
+        }
 
         initStage(false);
         if (Array.isArray(tpl.nodes)) {
