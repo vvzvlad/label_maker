@@ -103,10 +103,53 @@
       color: #e0e0e0;
       box-shadow: 0 0 0 0.2rem rgba(90,154,74,0.25);
     }
-    .sidebar textarea.form-control {
-      resize: vertical;
-      font-family: 'Consolas', 'Courier New', monospace;
-      font-size: 0.85rem;
+    .entities-table-wrap {
+      max-height: none;
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      border: 1px solid #333;
+      border-radius: 4px;
+      background: #252525;
+    }
+    .entities-table {
+      margin-bottom: 0;
+      color: #e0e0e0;
+      font-size: 0.78rem;
+    }
+    .entities-table thead th {
+      position: sticky;
+      top: 0;
+      background: #202020;
+      color: #bcbcbc;
+      border-color: #333;
+      padding: 3px 4px;
+      white-space: nowrap;
+    }
+    .entities-table td {
+      border-color: #333;
+      padding: 1px 2px;
+      background: #252525;
+      vertical-align: middle;
+    }
+    .entities-table .entity-input {
+      background: #252525;
+      border-color: #333;
+      color: #e0e0e0;
+      font-size: 0.75rem;
+      padding: 1px 4px !important;
+      height: auto;
+      min-width: 0;
+    }
+    .entities-table .entity-input:focus {
+      background: #2a2a2a;
+      border-color: #5A9A4A;
+      color: #e0e0e0;
+      box-shadow: 0 0 0 0.12rem rgba(90,154,74,0.25);
+    }
+    .entities-table .btn-delete-row {
+      padding: 0.12rem 0.35rem;
+      line-height: 1;
     }
 
     /* ── Buttons ── */
@@ -258,24 +301,31 @@
         </div>
       </div>
 
-      <!-- Labels textarea -->
-      <div style="flex:1;">
-        <label class="form-label" for="input-labels">Labels (one per line)</label>
-        <textarea
-          id="input-labels"
-          class="form-control"
-          rows="12"
-          placeholder="Label 1&#10;Label 2&#10;Label 3&#10;..."
-        ></textarea>
+      <!-- Entities table -->
+      <div style="flex:1; min-height:0; display:flex; flex-direction:column;">
+        <label class="form-label">Entities</label>
+        <div class="entities-table-wrap">
+          <table class="table table-sm entities-table">
+            <thead>
+              <tr>
+                <th>Entity 1</th>
+                <th>Entity 2</th>
+                <th>Entity 3</th>
+                <th style="width:1%;"></th>
+              </tr>
+            </thead>
+            <tbody id="entities-tbody"></tbody>
+          </table>
+        </div>
+        <button id="btn-add-entity-row" type="button" class="btn btn-outline-secondary btn-sm mt-2">
+          <i class="bi bi-plus-lg me-1"></i>Add row
+        </button>
       </div>
 
-      <!-- Generate / Preview / PDF buttons row -->
+      <!-- Generate PDF button -->
       <div class="d-flex gap-2 flex-wrap">
         <button id="btn-generate" class="btn btn-generate flex-fill" onclick="generatePDF()">
           <i class="bi bi-file-earmark-pdf me-1"></i> Generate PDF
-        </button>
-        <button class="btn btn-outline-secondary" onclick="renderPreviewStrip()">
-          <i class="bi bi-eye me-1"></i> Preview
         </button>
       </div>
 
@@ -309,11 +359,17 @@
             <i class="bi bi-slash-lg me-1"></i>Add Line
           </button>
           <select id="input-zoom" class="form-select form-select-sm" style="width:80px;" onchange="applyZoom()">
+            <option value="25">25%</option>
             <option value="50">50%</option>
             <option value="75">75%</option>
-            <option value="100" selected>100%</option>
+            <option value="100">100%</option>
             <option value="150">150%</option>
-            <option value="200">200%</option>
+            <option value="200" selected>200%</option>
+            <option value="300">300%</option>
+            <option value="400">400%</option>
+            <option value="500">500%</option>
+            <option value="750">750%</option>
+            <option value="1000">1000%</option>
           </select>
         </div>
       </div>
@@ -365,7 +421,6 @@
 
   <script>
     // ── DOM references ──────────────────────────────────────────────
-    const inputLabels   = document.getElementById('input-labels');
     const inputWidth    = document.getElementById('input-width');
     const inputHeight   = document.getElementById('input-height');
     const labelCounter  = document.getElementById('label-counter');
@@ -381,10 +436,66 @@
     let transformer = null;
     let bgRect      = null;
     let previewTimer = null;
+    let activeLineHandles = [];
 
     function schedulePreviewUpdate() {
       clearTimeout(previewTimer);
       previewTimer = setTimeout(renderPreviewStrip, 400);
+    }
+
+    /** Remove and destroy all active custom line endpoint handles. */
+    function clearLineHandles() {
+      activeLineHandles.forEach(handle => handle.destroy());
+      activeLineHandles = [];
+      if (layer) layer.batchDraw();
+    }
+
+    /**
+     * Create two draggable endpoint handles for the given line.
+     * Handles are positioned in stage coordinates and update line points in local coordinates.
+     */
+    function attachLineHandles(line) {
+      clearLineHandles();
+      const pts = line.points();
+
+      const handles = [0, 1].map(idx => {
+        const lx = pts[idx * 2];
+        const ly = pts[idx * 2 + 1];
+        const transform = line.getAbsoluteTransform();
+        const stagePos = transform.point({ x: lx, y: ly });
+
+        const circle = new Konva.Circle({
+          x: stagePos.x,
+          y: stagePos.y,
+          radius: 6,
+          fill: '#5A9A4A',
+          stroke: '#ffffff',
+          strokeWidth: 1.5,
+          draggable: true,
+          name: 'line-handle',
+        });
+        layer.add(circle);
+
+        circle.on('dragmove', () => {
+          const inv = line.getAbsoluteTransform().copy().invert();
+          const localPos = inv.point({ x: circle.x(), y: circle.y() });
+          const newPts = line.points().slice();
+          newPts[idx * 2] = localPos.x;
+          newPts[idx * 2 + 1] = localPos.y;
+          line.points(newPts);
+          layer.batchDraw();
+        });
+
+        circle.on('dragend', schedulePreviewUpdate);
+        circle.on('click tap', (e) => {
+          e.cancelBubble = true;
+        });
+
+        return circle;
+      });
+
+      activeLineHandles.push(...handles);
+      layer.batchDraw();
     }
 
     // ── Context menu ─────────────────────────────────────────────
@@ -427,6 +538,7 @@
     // Delete action
     ctxDelete.addEventListener('click', () => {
       if (ctxTarget) {
+        clearLineHandles();
         ctxTarget.destroy();
         transformer.nodes([]);
         layer.batchDraw();
@@ -480,14 +592,50 @@
 
     // ── Helpers ─────────────────────────────────────────────────────
 
-    /** Return array of non-empty label lines. */
-    function getLines() {
-      return inputLabels.value.split('\n').filter(l => l.trim() !== '');
+    /** Append a new entity row to the entities table. */
+    function addEntityRow(e1 = '', e2 = '', e3 = '') {
+      const tbody = document.getElementById('entities-tbody');
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><input type="text" class="entity-input form-control form-control-sm" value="${e1}" /></td>
+        <td><input type="text" class="entity-input form-control form-control-sm" value="${e2}" /></td>
+        <td><input type="text" class="entity-input form-control form-control-sm" value="${e3}" /></td>
+        <td class="text-center">
+          <button type="button" class="btn btn-outline-danger btn-sm btn-delete-row" title="Delete row" aria-label="Delete row">
+            <i class="bi bi-trash"></i>
+          </button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+
+      tr.querySelector('.btn-delete-row').addEventListener('click', () => {
+        tr.remove();
+        updateCounter();
+        schedulePreviewUpdate();
+      });
+
+      return tr;
+    }
+
+    /** Return array of non-empty entity rows. */
+    function getRows() {
+      const tbody = document.getElementById('entities-tbody');
+      const rows = [];
+      tbody.querySelectorAll('tr').forEach((tr) => {
+        const inputs = tr.querySelectorAll('input.entity-input');
+        const entity1 = (inputs[0]?.value || '').trim();
+        const entity2 = (inputs[1]?.value || '').trim();
+        const entity3 = (inputs[2]?.value || '').trim();
+        if (entity1 !== '' || entity2 !== '' || entity3 !== '') {
+          rows.push({ entity1, entity2, entity3 });
+        }
+      });
+      return rows;
     }
 
     /** Update the label count display. */
     function updateCounter() {
-      const n = getLines().length;
+      const n = getRows().length;
       labelCounter.textContent = n === 1 ? '1 label loaded' : `${n} labels loaded`;
     }
 
@@ -573,6 +721,7 @@
         layer = null;
         transformer = null;
         bgRect = null;
+        activeLineHandles = [];
       }
 
       // Create new stage
@@ -612,6 +761,7 @@
       stage.on('click tap', (e) => {
         if (e.target === stage || e.target === bgRect) {
           hideContextMenu();
+          clearLineHandles();
           transformer.nodes([]);
           layer.batchDraw();
         }
@@ -836,18 +986,24 @@
 
       line.on('click tap', (e) => {
         e.cancelBubble = true;
-        transformer.nodes([line]);
+        clearLineHandles();
+        transformer.nodes([]);
+        attachLineHandles(line);
         layer.batchDraw();
       });
       line.on('contextmenu', (e) => {
         e.evt.preventDefault();
-        transformer.nodes([line]);
+        clearLineHandles();
+        attachLineHandles(line);
+        transformer.nodes([]);
         layer.batchDraw();
         showContextMenu(e.evt.clientX, e.evt.clientY, line);
       });
       line.on('dragend', schedulePreviewUpdate);
 
-      transformer.nodes([line]);
+      clearLineHandles();
+      transformer.nodes([]);
+      attachLineHandles(line);
       layer.batchDraw();
       schedulePreviewUpdate();
     }
@@ -911,12 +1067,16 @@
 
           line.on('click tap', (e) => {
             e.cancelBubble = true;
-            transformer.nodes([line]);
+            clearLineHandles();
+            transformer.nodes([]);
+            attachLineHandles(line);
             layer.batchDraw();
           });
           line.on('contextmenu', (e) => {
             e.evt.preventDefault();
-            transformer.nodes([line]);
+            clearLineHandles();
+            attachLineHandles(line);
+            transformer.nodes([]);
             layer.batchDraw();
             showContextMenu(e.evt.clientX, e.evt.clientY, line);
           });
@@ -1020,9 +1180,9 @@
      * The stage is exported as a PNG via stage.toDataURL() at 300 DPI equivalent.
      */
     function generatePDF() {
-      const lines = getLines();
-      if (lines.length === 0) {
-        showToast('No labels to generate. Paste at least one line first.', 'danger');
+      const rows = getRows();
+      if (rows.length === 0) {
+        showToast('No labels to generate. Add at least one row first.', 'danger');
         return;
       }
 
@@ -1041,9 +1201,6 @@
       // Collect all text nodes (skip background rect and transformer)
       const textNodes = layer.getChildren().filter(n => n.getClassName() === 'Text');
 
-      // Regex to detect placeholder pattern %%SOMETHING%%
-      const placeholderRe = /^%%[^%]+%%$/;
-
       // Remember original texts for restoration after each export
       const originalTexts = textNodes.map(n => n.text());
 
@@ -1051,14 +1208,19 @@
       const prevSelected = transformer.nodes().slice();
       transformer.nodes([]);
 
-      lines.forEach((labelLine, idx) => {
+      // Hide endpoint handles so they don't appear in exported PDF
+      activeLineHandles.forEach(h => h.hide());
+
+      rows.forEach((row, idx) => {
         if (idx > 0) doc.addPage([widthMm, heightMm], orientation);
 
-        // Substitute placeholders; convert literal \n sequences to real newlines
+        // Substitute ENTITY placeholders; convert literal \n sequences to real newlines
         textNodes.forEach((node, ni) => {
-          if (placeholderRe.test(originalTexts[ni])) {
-            node.text(labelLine.replace(/\\n/g, '\n'));
-          }
+          let t = originalTexts[ni];
+          t = t.replace(/%%ENTITY1%%/g, row.entity1.replace(/\\n/g, '\n'));
+          t = t.replace(/%%ENTITY2%%/g, row.entity2.replace(/\\n/g, '\n'));
+          t = t.replace(/%%ENTITY3%%/g, row.entity3.replace(/\\n/g, '\n'));
+          node.text(t);
         });
 
         layer.batchDraw();
@@ -1075,33 +1237,43 @@
       transformer.nodes(prevSelected);
       layer.batchDraw();
 
+      // Restore endpoint handle visibility
+      activeLineHandles.forEach(h => h.show());
+      layer.batchDraw();
+
       doc.save('labels.pdf');
-      showToast(`PDF with ${lines.length} label${lines.length > 1 ? 's' : ''} generated!`, 'success');
+      showToast(`PDF with ${rows.length} label${rows.length > 1 ? 's' : ''} generated!`, 'success');
     }
 
     function renderPreviewStrip() {
-      const lines = getLines();
+      const rows = getRows();
       const strip = document.getElementById('preview-strip');
       strip.innerHTML = '';
       strip.style.display = 'flex';
 
-      if (lines.length === 0) {
-        strip.innerHTML = '<span style="color:#666; font-size:0.82rem; padding:8px;">No labels — paste at least one line.</span>';
+      if (rows.length === 0) {
+        strip.innerHTML = '<span style="color:#666; font-size:0.82rem; padding:8px;">No labels — add at least one row.</span>';
         return;
       }
 
       const textNodes = layer.getChildren().filter(n => n.getClassName() === 'Text');
       const originalTexts = textNodes.map(n => n.text());
-      const placeholderRe = /^%%[^%]+%%$/;
 
       // Temporarily detach transformer
       const prevSelected = transformer.nodes().slice();
       transformer.nodes([]);
 
-      lines.forEach((labelLine) => {
-        // Substitute placeholders; convert literal \n sequences to real newlines
+      // Hide endpoint handles so they don't appear in preview thumbnails
+      activeLineHandles.forEach(h => h.hide());
+
+      rows.forEach((row) => {
+        // Substitute ENTITY placeholders; convert literal \n sequences to real newlines
         textNodes.forEach((node, ni) => {
-          if (placeholderRe.test(originalTexts[ni])) node.text(labelLine.replace(/\\n/g, '\n'));
+          let t = originalTexts[ni];
+          t = t.replace(/%%ENTITY1%%/g, row.entity1.replace(/\\n/g, '\n'));
+          t = t.replace(/%%ENTITY2%%/g, row.entity2.replace(/\\n/g, '\n'));
+          t = t.replace(/%%ENTITY3%%/g, row.entity3.replace(/\\n/g, '\n'));
+          node.text(t);
         });
         layer.batchDraw();
 
@@ -1118,7 +1290,7 @@
         const img = document.createElement('img');
         img.src = dataUrl;
         const label = document.createElement('span');
-        label.textContent = labelLine;
+        label.textContent = row.entity1 || row.entity2 || row.entity3 || '(empty)';
         wrapper.appendChild(img);
         wrapper.appendChild(label);
         strip.appendChild(wrapper);
@@ -1126,6 +1298,10 @@
 
       // Restore transformer
       transformer.nodes(prevSelected);
+      layer.batchDraw();
+
+      // Restore endpoint handle visibility
+      activeLineHandles.forEach(h => h.show());
       layer.batchDraw();
     }
 
@@ -1138,7 +1314,53 @@
 
     // ── Event listeners ──────────────────────────────────────────────
 
-    inputLabels.addEventListener('input', () => {
+    document.getElementById('entities-tbody').addEventListener('input', () => {
+      updateCounter();
+      schedulePreviewUpdate();
+    });
+
+    document.getElementById('entities-tbody').addEventListener('paste', (e) => {
+      const target = e.target;
+      if (!target.classList.contains('entity-input')) return;
+
+      e.preventDefault();
+      const text = e.clipboardData.getData('text/plain');
+      const pasteRows = text.split(/\r?\n/).filter(r => r !== '');
+      if (pasteRows.length === 0) return;
+      const pasteData = pasteRows.map(r => r.split('\t'));
+
+      const tbody = document.getElementById('entities-tbody');
+      const allRows = Array.from(tbody.querySelectorAll('tr'));
+      const focusedRow = target.closest('tr');
+      const startRowIdx = allRows.indexOf(focusedRow);
+      if (startRowIdx < 0) return;
+
+      const rowInputs = Array.from(focusedRow.querySelectorAll('input.entity-input'));
+      const startColIdx = rowInputs.indexOf(target);
+      if (startColIdx < 0) return;
+
+      pasteData.forEach((cols, ri) => {
+        const rowIdx = startRowIdx + ri;
+        while (tbody.querySelectorAll('tr').length <= rowIdx) {
+          addEntityRow();
+        }
+
+        const tr = tbody.querySelectorAll('tr')[rowIdx];
+        const inputs = tr.querySelectorAll('input.entity-input');
+        cols.forEach((val, ci) => {
+          const colIdx = startColIdx + ci;
+          if (colIdx < inputs.length) {
+            inputs[colIdx].value = val;
+          }
+        });
+      });
+
+      updateCounter();
+      schedulePreviewUpdate();
+    });
+
+    document.getElementById('btn-add-entity-row').addEventListener('click', () => {
+      addEntityRow();
       updateCounter();
       schedulePreviewUpdate();
     });
@@ -1148,8 +1370,9 @@
 
     // ── Initialise ───────────────────────────────────────────────────
 
-    updateCounter();
     initStage();
+    addEntityRow();
+    updateCounter();
 
     // Add a default placeholder text node so users see an example
     addTextNodeWithProps('%%ENTITY1%%', 10, 10, DEFAULT_FONT_SIZE, '#000000');
