@@ -129,6 +129,25 @@
       padding: 3px 4px;
       white-space: nowrap;
     }
+    .entities-table thead th .btn-delete-col {
+      position: absolute;
+      top: 1px;
+      right: 2px;
+      padding: 0 3px;
+      font-size: 0.65rem;
+      line-height: 1.4;
+      background: transparent;
+      border: none;
+      color: #ff6b6b;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s;
+      cursor: pointer;
+    }
+    .entities-table thead th:hover .btn-delete-col {
+      opacity: 1;
+      pointer-events: auto;
+    }
     .entities-table td {
       border-color: #444;
       border-right: 1px solid #444;
@@ -466,6 +485,7 @@
     let previewTimer = null;
     let activeLineHandles = [];
     let entityColumnCount = 3;
+    const imageCache = new Map();
 
     function schedulePreviewUpdate() {
       clearTimeout(previewTimer);
@@ -757,6 +777,20 @@
       });
     }
 
+    async function loadImageCached(url) {
+      if (imageCache.has(url)) {
+        return imageCache.get(url);
+      }
+
+      try {
+        const img = await loadImageFromUrl(url);
+        imageCache.set(url, img);
+        return img;
+      } catch (error) {
+        throw error;
+      }
+    }
+
     function substituteEntityPlaceholders(value, row) {
       let result = value || '';
       const entities = Array.isArray(row?.entities)
@@ -787,7 +821,42 @@
 
       for (let i = 0; i < entityColumnCount; i += 1) {
         const th = document.createElement('th');
-        th.textContent = `%E${i + 1}%`;
+        const label = document.createElement('span');
+        label.textContent = `%E${i + 1}%`;
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.className = 'btn-delete-col';
+        deleteBtn.textContent = '✕';
+        deleteBtn.title = 'Delete column';
+        deleteBtn.setAttribute('aria-label', 'Delete column');
+        deleteBtn.dataset.colIndex = String(i);
+        deleteBtn.addEventListener('click', () => {
+          if (entityColumnCount <= 1) {
+            showToast('At least one column must remain.', 'warning');
+            return;
+          }
+
+          const colIndex = Number.parseInt(deleteBtn.dataset.colIndex || '-1', 10);
+          if (colIndex < 0 || colIndex >= entityColumnCount) return;
+
+          const tbody = document.getElementById('entities-tbody');
+          tbody.querySelectorAll('tr').forEach((tr) => {
+            const cellToRemove = tr.children[colIndex];
+            if (cellToRemove) {
+              cellToRemove.remove();
+            }
+          });
+
+          entityColumnCount -= 1;
+          renderTableHeader();
+          updateCounter();
+          autoSaveTable();
+          schedulePreviewUpdate();
+        });
+
+        th.appendChild(label);
+        th.appendChild(deleteBtn);
         headRow.appendChild(th);
       }
 
@@ -1801,7 +1870,7 @@
             let imageForRow = createUrlPlaceholderImage();
             if (resolvedUrl) {
               try {
-                imageForRow = await loadImageFromUrl(resolvedUrl);
+                imageForRow = await loadImageCached(resolvedUrl);
               } catch {
                 imageForRow = createUrlPlaceholderImage();
               }
@@ -1820,12 +1889,7 @@
             });
             offLayer.add(imageNode);
           } else if (n.type === 'image' && n.src) {
-            const imgEl = await new Promise((resolve, reject) => {
-              const img = new Image();
-              img.onload = () => resolve(img);
-              img.onerror = () => reject(new Error('Failed to load image data URL'));
-              img.src = n.src;
-            });
+            const imgEl = await loadImageCached(n.src);
             const imageNode = new Konva.Image({
               image: imgEl,
               x: n.x,
@@ -1959,7 +2023,7 @@
           let imageForRow = createUrlPlaceholderImage();
           if (resolvedUrl) {
             try {
-              imageForRow = await loadImageFromUrl(resolvedUrl);
+              imageForRow = await loadImageCached(resolvedUrl);
             } catch {
               imageForRow = createUrlPlaceholderImage();
             }
