@@ -315,7 +315,7 @@
       <span class="icon">🏷️</span>
       <span>Label Maker</span>
     </div>
-    <div class="footer-text">Developed by Asakusa Lab</div>
+    <div class="footer-text">Developed by <a href="https://asakusa-lab.cc/" target="_blank">Asakusa Lab</a></div>
   </div>
 
   <!-- Main area -->
@@ -2317,8 +2317,8 @@
     // Detect canvas fingerprinting protection at startup
     if (isCanvasReadBlocked()) {
       document.getElementById('canvas-block-warning').style.display = 'block';
-      // Push main content down to account for the warning banner height
-      document.querySelector('.top-bar').style.marginTop = '42px';
+      // Push entire page content down so the fixed banner does not overlap the top bar
+      document.body.style.paddingTop = '42px';
     }
   </script>
 </body>
