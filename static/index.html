@@ -429,6 +429,24 @@
   <!-- Toast container -->
   <div class="toast-container" id="toast-container"></div>
 
+  <!-- Canvas block warning banner -->
+  <div id="canvas-block-warning" style="
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 99999;
+    background: #7a1e1e;
+    color: #fff;
+    padding: 10px 20px;
+    font-size: 0.88rem;
+    text-align: center;
+    border-bottom: 2px solid #ff4444;
+  ">
+    ⚠️ <strong>Canvas access is blocked</strong> — your browser's anti-fingerprinting protection is preventing the template editor from working.
+    Element selection and editing will not function.
+    Please disable canvas protection for this site in your browser settings or extension.
+  </div>
+
   <!-- Right-click context menu for canvas elements -->
   <div id="ctx-menu" style="
     display:none; position:fixed; z-index:20000;
@@ -467,6 +485,22 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
   <script>
+    // Check if canvas pixel read-back is blocked by anti-fingerprinting protection
+    function isCanvasReadBlocked() {
+      try {
+        const c = document.createElement('canvas');
+        c.width = 10;
+        c.height = 10;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#4d2d7a'; // distinctive color unlikely to appear by chance
+        ctx.fillRect(2, 2, 6, 6);
+        const d = ctx.getImageData(3, 3, 1, 1).data;
+        return d[0] !== 0x4d || d[1] !== 0x2d || d[2] !== 0x7a;
+      } catch {
+        return true;
+      }
+    }
+
     // ── DOM references ──────────────────────────────────────────────
     const inputWidth    = document.getElementById('input-width');
     const inputHeight   = document.getElementById('input-height');
@@ -2279,6 +2313,13 @@
 
     updateCounter();
     schedulePreviewUpdate();
+
+    // Detect canvas fingerprinting protection at startup
+    if (isCanvasReadBlocked()) {
+      document.getElementById('canvas-block-warning').style.display = 'block';
+      // Push main content down to account for the warning banner height
+      document.querySelector('.top-bar').style.marginTop = '42px';
+    }
   </script>
 </body>
 </html>
