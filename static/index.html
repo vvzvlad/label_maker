@@ -1697,6 +1697,7 @@
         widthMm: parseFloat(inputWidth.value) || 58,
         heightMm: parseFloat(inputHeight.value) || 40,
         zoom: parseInt(document.getElementById('input-zoom').value, 10) || 200,
+        columnCount: entityColumnCount,
         nodes,
       };
       const blob = new Blob([JSON.stringify(tpl, null, 2)], { type: 'application/json' });
@@ -1942,6 +1943,11 @@
             document.getElementById('input-zoom').value = tpl.zoom;
             document.getElementById('zoom-label').textContent = tpl.zoom + '%';
           }
+          // Restore column count if present in template
+          if (Number.isInteger(tpl.columnCount) && tpl.columnCount > 0) {
+            entityColumnCount = tpl.columnCount;
+          }
+          renderTableHeader();
 
           initStage(false);
           restoreSavedNodes(tpl.nodes);
