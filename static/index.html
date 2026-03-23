@@ -333,6 +333,10 @@
           <span style="font-size:0.75rem; color:#888;">×</span>
           <input type="number" id="input-height" class="form-control form-control-sm" value="40" min="1" step="1" style="width:58px;" />
           <span style="font-size:0.75rem; color:#888; white-space:nowrap;">mm</span>
+          <div class="form-check form-check-inline ms-1 mb-0" style="white-space:nowrap;">
+            <input class="form-check-input" type="checkbox" id="input-rotate-90" />
+            <label class="form-check-label" for="input-rotate-90" style="font-size:0.75rem; color:#888; cursor:pointer;">Rotate 90°</label>
+          </div>
         </div>
       </div>
 
@@ -1913,6 +1917,29 @@
       return canvas.toDataURL('image/png');
     }
 
+    /**
+     * Rotate an image data URL 90 degrees clockwise.
+     * Returns a new data URL of the rotated image.
+     */
+    async function rotateImageData90cw(dataUrl) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          // Swap width/height for 90-degree rotation
+          canvas.width = img.height;
+          canvas.height = img.width;
+          const ctx = canvas.getContext('2d');
+          // Rotate 90 degrees clockwise: translate to right edge, then rotate
+          ctx.translate(img.height, 0);
+          ctx.rotate(Math.PI / 2);
+          ctx.drawImage(img, 0, 0);
+          resolve(canvas.toDataURL('image/png'));
+        };
+        img.src = dataUrl;
+      });
+    }
+
     async function renderOffscreenLabel(serializedNodes, row, stageW, stageH, thumbScale) {
       const offscreenContainer = document.createElement('div');
       offscreenContainer.style.position = 'absolute';
@@ -2089,14 +2116,18 @@
 
       const widthMm  = parseFloat(inputWidth.value)  || 58;
       const heightMm = parseFloat(inputHeight.value) || 40;
+      const rotatePdf = document.getElementById('input-rotate-90').checked;
+      // For rotated export: page dimensions are swapped (label is placed rotated)
+      const pdfPageWidthMm  = rotatePdf ? heightMm : widthMm;
+      const pdfPageHeightMm = rotatePdf ? widthMm  : heightMm;
 
-      const isLandscape = widthMm > heightMm;
+      const isLandscape = pdfPageWidthMm > pdfPageHeightMm;
       const orientation = isLandscape ? 'landscape' : 'portrait';
 
       const doc = new window.jspdf.jsPDF({
         orientation,
         unit: 'mm',
-        format: [widthMm, heightMm],
+        format: [pdfPageWidthMm, pdfPageHeightMm],
       });
 
       // Collect all text nodes (skip background rect and transformer)
@@ -2118,7 +2149,7 @@
 
       for (let idx = 0; idx < rows.length; idx += 1) {
         const row = rows[idx];
-        if (idx > 0) doc.addPage([widthMm, heightMm], orientation);
+        if (idx > 0) doc.addPage([pdfPageWidthMm, pdfPageHeightMm], orientation);
 
         // Substitute ENTITY placeholders; convert literal \n sequences to real newlines
         textNodes.forEach((node, ni) => {
@@ -2155,8 +2186,12 @@
         layer.batchDraw();
 
         // Export stage as PNG at PDF_DPI resolution
-        const imgData = await applyOtsuBinarization(stage.toDataURL({ pixelRatio: PDF_DPI / 96 }));
-        doc.addImage(imgData, 'PNG', 0, 0, widthMm, heightMm);
+        let imgData = await applyOtsuBinarization(stage.toDataURL({ pixelRatio: PDF_DPI / 96 }));
+        // If rotation is requested, rotate the exported image 90 degrees clockwise
+        if (rotatePdf) {
+          imgData = await rotateImageData90cw(imgData);
+        }
+        doc.addImage(imgData, 'PNG', 0, 0, pdfPageWidthMm, pdfPageHeightMm);
 
         // Restore original texts
         textNodes.forEach((node, ni) => node.text(originalTexts[ni]));
