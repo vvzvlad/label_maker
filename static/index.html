@@ -481,12 +481,27 @@
         style="background:#252525; border-color:#333; color:#e0e0e0; width:80px;"
       />
     </div>
+    <div data-textheight-row="" style="padding:6px 14px; color:#bbb; font-size:0.75rem; user-select:none;">Text height (px)</div>
+    <div data-textheight-row="" style="padding:2px 14px 8px;">
+      <input id="ctx-textheight" type="number" min="4" max="2000" step="1"
+        class="form-control form-control-sm"
+        style="background:#252525; border-color:#333; color:#e0e0e0; width:80px;"
+      />
+    </div>
     <div data-align-row="" style="padding:2px 14px 8px;">
       <label style="font-size:0.75rem; color:#bbb;">Alignment</label>
       <div style="display:flex; gap:4px;">
         <button id="ctx-align-left" class="btn btn-sm btn-outline-secondary" title="Left"><i class="bi bi-text-left"></i></button>
         <button id="ctx-align-center" class="btn btn-sm btn-outline-secondary" title="Center"><i class="bi bi-text-center"></i></button>
         <button id="ctx-align-right" class="btn btn-sm btn-outline-secondary" title="Right"><i class="bi bi-text-right"></i></button>
+      </div>
+    </div>
+    <div data-valign-row="" style="padding:2px 14px 8px;">
+      <label style="font-size:0.75rem; color:#bbb;">Vertical align</label>
+      <div style="display:flex; gap:4px;">
+        <button id="ctx-valign-top" class="btn btn-sm btn-outline-secondary" title="Top"><i class="bi bi-align-top"></i></button>
+        <button id="ctx-valign-middle" class="btn btn-sm btn-outline-secondary" title="Middle"><i class="bi bi-align-middle"></i></button>
+        <button id="ctx-valign-bottom" class="btn btn-sm btn-outline-secondary" title="Bottom"><i class="bi bi-align-bottom"></i></button>
       </div>
     </div>
     <div data-stroke-row="" style="padding:2px 14px 8px;">
@@ -603,10 +618,14 @@
     const ctxMenu       = document.getElementById('ctx-menu');
     const ctxDelete     = document.getElementById('ctx-delete');
     const ctxFontInput  = document.getElementById('ctx-fontsize');
+    const ctxTextHeightInput = document.getElementById('ctx-textheight');
     const ctxStrokeInput = document.getElementById('ctx-strokewidth');
     const ctxAlignLeft  = document.getElementById('ctx-align-left');
     const ctxAlignCenter = document.getElementById('ctx-align-center');
     const ctxAlignRight = document.getElementById('ctx-align-right');
+    const ctxValignTop    = document.getElementById('ctx-valign-top');
+    const ctxValignMiddle = document.getElementById('ctx-valign-middle');
+    const ctxValignBottom = document.getElementById('ctx-valign-bottom');
     let ctxTarget       = null;
 
     function setAlignButtonsActive(align) {
@@ -622,12 +641,26 @@
       });
     }
 
+    function setVerticalAlignButtonsActive(verticalAlign) {
+      const value = verticalAlign || 'top';
+      const buttons = [
+        { el: ctxValignTop, value: 'top' },
+        { el: ctxValignMiddle, value: 'middle' },
+        { el: ctxValignBottom, value: 'bottom' },
+      ];
+      buttons.forEach(({ el, value: btnValue }) => {
+        const isActive = value === btnValue;
+        el.classList.toggle('active', isActive);
+      });
+    }
+
     /** Show context menu near the given screen position for the given node. */
     function showContextMenu(x, y, node) {
       ctxTarget = node;
       const cls = node.getClassName();
 
       ctxFontInput.value = cls === 'Text' ? node.fontSize() : '';
+      ctxTextHeightInput.value = cls === 'Text' ? Math.round(node.height()) : '';
       ctxStrokeInput.value = cls === 'Line' ? node.strokeWidth() : '';
 
       // Show menu, then reposition to stay within viewport
@@ -638,12 +671,19 @@
       ctxMenu.style.top = (y + mh > window.innerHeight ? y - mh : y) + 'px';
 
       const hasFontSize = cls === 'Text';
+      const hasTextHeight = cls === 'Text';
       const hasAlign = cls === 'Text';
       const hasStrokeWidth = cls === 'Line';
       ctxMenu.querySelectorAll('[data-fontsize-row]').forEach(el => {
         el.style.display = hasFontSize ? '' : 'none';
       });
+      ctxMenu.querySelectorAll('[data-textheight-row]').forEach(el => {
+        el.style.display = hasTextHeight ? '' : 'none';
+      });
       ctxMenu.querySelectorAll('[data-align-row]').forEach(el => {
+        el.style.display = hasAlign ? '' : 'none';
+      });
+      ctxMenu.querySelectorAll('[data-valign-row]').forEach(el => {
         el.style.display = hasAlign ? '' : 'none';
       });
       ctxMenu.querySelectorAll('[data-stroke-row]').forEach(el => {
@@ -652,8 +692,10 @@
 
       if (hasAlign) {
         setAlignButtonsActive(node.align() || 'left');
+        setVerticalAlignButtonsActive(node.verticalAlign() || 'top');
       } else {
         setAlignButtonsActive('left');
+        setVerticalAlignButtonsActive('top');
       }
     }
 
@@ -685,6 +727,17 @@
       }
     });
     ctxFontInput.addEventListener('change', () => schedulePreviewUpdate());
+
+    ctxTextHeightInput.addEventListener('input', () => {
+      if (ctxTarget && ctxTarget.getClassName() === 'Text') {
+        const h = parseInt(ctxTextHeightInput.value, 10);
+        if (h > 0) {
+          ctxTarget.height(h);
+          layer.batchDraw();
+        }
+      }
+    });
+    ctxTextHeightInput.addEventListener('change', () => schedulePreviewUpdate());
 
     // Stroke width change — apply live on input
     ctxStrokeInput.addEventListener('input', () => {
@@ -722,6 +775,34 @@
       if (ctxTarget && ctxTarget.getClassName() === 'Text') {
         ctxTarget.align('right');
         setAlignButtonsActive('right');
+        layer.batchDraw();
+        schedulePreviewUpdate();
+      }
+    });
+
+    ctxValignTop.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (ctxTarget && ctxTarget.getClassName() === 'Text') {
+        ctxTarget.verticalAlign('top');
+        setVerticalAlignButtonsActive('top');
+        layer.batchDraw();
+        schedulePreviewUpdate();
+      }
+    });
+    ctxValignMiddle.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (ctxTarget && ctxTarget.getClassName() === 'Text') {
+        ctxTarget.verticalAlign('middle');
+        setVerticalAlignButtonsActive('middle');
+        layer.batchDraw();
+        schedulePreviewUpdate();
+      }
+    });
+    ctxValignBottom.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (ctxTarget && ctxTarget.getClassName() === 'Text') {
+        ctxTarget.verticalAlign('bottom');
+        setVerticalAlignButtonsActive('bottom');
         layer.batchDraw();
         schedulePreviewUpdate();
       }
@@ -1037,11 +1118,13 @@
               rotation: node.rotation(),
               scaleX:   node.scaleX(),
               scaleY:   node.scaleY(),
-              fontSize: node.fontSize(),
-              fill:     node.fill(),
-              width:    node.width(),
-              align:    node.align(),
-            });
+               fontSize: node.fontSize(),
+               fill:     node.fill(),
+               width:    node.width(),
+               height:   node.height(),
+               align:    node.align(),
+               verticalAlign: node.verticalAlign(),
+             });
           } else if (cls === 'Image') {
             if (node._isQrNode) {
               savedNodes.push({
@@ -1160,7 +1243,7 @@
     /**
      * Create and register a Konva.Text node with interaction handlers.
      */
-    function addTextNodeWithProps(text, x, y, fontSize, fill, width = 200, align = 'left') {
+    function addTextNodeWithProps(text, x, y, fontSize, fill, width = 200, align = 'left', verticalAlign = 'top', textHeight = undefined) {
       const textNode = new Konva.Text({
         text:      text,
         x:         x,
@@ -1169,6 +1252,8 @@
         fill:      fill || '#000000',
         width:     width,
         align:     align,
+        verticalAlign: verticalAlign,
+        height:    textHeight !== undefined ? textHeight : stage.height(),
         wrap:      'word',
         draggable: true,
       });
@@ -1178,7 +1263,7 @@
       // Single click → select (attach transformer)
       textNode.on('click tap', (e) => {
         e.cancelBubble = true;
-        transformer.enabledAnchors(['middle-left', 'middle-right']);
+        transformer.enabledAnchors(['middle-left', 'middle-right', 'top-center', 'bottom-center']);
         transformer.nodes([textNode]);
         layer.batchDraw();
       });
@@ -1191,7 +1276,7 @@
       // Right-click → context menu
       textNode.on('contextmenu', (e) => {
         e.evt.preventDefault();
-        transformer.enabledAnchors(['middle-left', 'middle-right']);
+        transformer.enabledAnchors(['middle-left', 'middle-right', 'top-center', 'bottom-center']);
         transformer.nodes([textNode]);
         layer.batchDraw();
         showContextMenu(e.evt.clientX, e.evt.clientY, textNode);
@@ -1199,11 +1284,11 @@
 
       textNode.on('dragend', schedulePreviewUpdate);
 
-      // Convert Transformer horizontal scale into text box width; font size stays fixed.
-      // Only scaleX is reset — scaleY is left untouched to avoid Y-position jumps from text reflow.
       textNode.on('transform', () => {
         textNode.width(Math.max(20, textNode.width() * textNode.scaleX()));
         textNode.scaleX(1);
+        textNode.height(Math.max(4, textNode.height() * textNode.scaleY()));
+        textNode.scaleY(1);
         layer.batchDraw();
       });
       textNode.on('transformend', schedulePreviewUpdate);
@@ -1277,7 +1362,7 @@
         textNode.text(newText);
         textNode.show();
         transformer.nodes([textNode]);
-        transformer.enabledAnchors(['middle-left', 'middle-right']);
+        transformer.enabledAnchors(['middle-left', 'middle-right', 'top-center', 'bottom-center']);
         layer.batchDraw();
         schedulePreviewUpdate();
         textarea.remove();
@@ -1296,7 +1381,7 @@
           committed = true;
           textNode.show();
           transformer.nodes([textNode]);
-          transformer.enabledAnchors(['middle-left', 'middle-right']);
+          transformer.enabledAnchors(['middle-left', 'middle-right', 'top-center', 'bottom-center']);
           layer.batchDraw();
           textarea.remove();
         }
@@ -1576,7 +1661,7 @@
     function restoreSavedNodes(nodes) {
       nodes.forEach(n => {
         if (n.type === 'text') {
-          const node = addTextNodeWithProps(n.text, n.x, n.y, n.fontSize, n.fill, n.width, n.align || 'left');
+          const node = addTextNodeWithProps(n.text, n.x, n.y, n.fontSize, n.fill, n.width, n.align || 'left', n.verticalAlign || 'top', n.height);
           // Restore transform attributes that Transformer may have applied
           if (n.rotation) node.rotation(n.rotation);
           if (n.scaleX   !== undefined) node.scaleX(n.scaleX);
@@ -1686,7 +1771,9 @@
             fontSize: node.fontSize(),
             fill:     node.fill(),
             width:    node.width(),
+            height:   node.height(),
             align:    node.align(),
+            verticalAlign: node.verticalAlign(),
           });
         } else if (cls === 'Image') {
           if (node._isQrNode) {
@@ -1779,7 +1866,9 @@
             fontSize: node.fontSize(),
             fill:     node.fill(),
             width:    node.width(),
+            height:   node.height(),
             align:    node.align(),
+            verticalAlign: node.verticalAlign(),
           });
         } else if (cls === 'Image') {
           if (node._isQrNode) {
@@ -1998,6 +2087,8 @@
               fill: n.fill,
               width: n.width,
               align: n.align || 'left',
+              verticalAlign: n.verticalAlign || 'top',
+              height: n.height !== undefined ? n.height : stageH,
               wrap: 'word',
             });
             offLayer.add(textNode);
