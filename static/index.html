@@ -474,34 +474,40 @@
       <i class="bi bi-trash me-2"></i>Delete
     </div>
     <div style="border-top:1px solid #333; margin:4px 0;"></div>
-    <div data-fontsize-row="" style="padding:6px 14px; color:#bbb; font-size:0.75rem; user-select:none;">Font size (px)</div>
-    <div data-fontsize-row="" style="padding:2px 14px 8px;">
-      <input id="ctx-fontsize" type="number" min="4" max="200" step="1"
-        class="form-control form-control-sm"
-        style="background:#252525; border-color:#333; color:#e0e0e0; width:80px;"
-      />
-    </div>
-    <div data-textheight-row="" style="padding:6px 14px; color:#bbb; font-size:0.75rem; user-select:none;">Text height (px)</div>
-    <div data-textheight-row="" style="padding:2px 14px 8px;">
-      <input id="ctx-textheight" type="number" min="4" max="2000" step="1"
-        class="form-control form-control-sm"
-        style="background:#252525; border-color:#333; color:#e0e0e0; width:80px;"
-      />
-    </div>
-    <div data-align-row="" style="padding:2px 14px 8px;">
-      <label style="font-size:0.75rem; color:#bbb;">Alignment</label>
-      <div style="display:flex; gap:4px;">
-        <button id="ctx-align-left" class="btn btn-sm btn-outline-secondary" title="Left"><i class="bi bi-text-left"></i></button>
-        <button id="ctx-align-center" class="btn btn-sm btn-outline-secondary" title="Center"><i class="bi bi-text-center"></i></button>
-        <button id="ctx-align-right" class="btn btn-sm btn-outline-secondary" title="Right"><i class="bi bi-text-right"></i></button>
+    <!-- Font size + Area height on one row -->
+    <div id="ctx-sizes-row" style="padding:6px 14px 8px; display:flex; gap:8px; align-items:flex-end;">
+      <div>
+        <div style="color:#bbb; font-size:0.75rem; user-select:none; margin-bottom:4px;">Font size (px)</div>
+        <input id="ctx-fontsize" type="number" min="4" max="200" step="1"
+          class="form-control form-control-sm"
+          style="background:#252525; border-color:#333; color:#e0e0e0; width:80px;"
+        />
+      </div>
+      <div>
+        <div style="color:#bbb; font-size:0.75rem; user-select:none; margin-bottom:4px;">Area height (px)</div>
+        <input id="ctx-textheight" type="number" min="4" max="2000" step="1"
+          class="form-control form-control-sm"
+          style="background:#252525; border-color:#333; color:#e0e0e0; width:80px;"
+        />
       </div>
     </div>
-    <div data-valign-row="" style="padding:2px 14px 8px;">
-      <label style="font-size:0.75rem; color:#bbb;">Vertical align</label>
-      <div style="display:flex; gap:4px;">
-        <button id="ctx-valign-top" class="btn btn-sm btn-outline-secondary" title="Top"><i class="bi bi-align-top"></i></button>
-        <button id="ctx-valign-middle" class="btn btn-sm btn-outline-secondary" title="Middle"><i class="bi bi-align-middle"></i></button>
-        <button id="ctx-valign-bottom" class="btn btn-sm btn-outline-secondary" title="Bottom"><i class="bi bi-align-bottom"></i></button>
+    <!-- Horizontal align + Vertical align on one row -->
+    <div id="ctx-aligns-row" style="padding:2px 14px 8px; display:flex; gap:16px; align-items:flex-start;">
+      <div>
+        <div style="font-size:0.75rem; color:#bbb; margin-bottom:4px;">Alignment</div>
+        <div style="display:flex; gap:4px;">
+          <button id="ctx-align-left" class="btn btn-sm btn-outline-secondary" title="Left"><i class="bi bi-text-left"></i></button>
+          <button id="ctx-align-center" class="btn btn-sm btn-outline-secondary" title="Center"><i class="bi bi-text-center"></i></button>
+          <button id="ctx-align-right" class="btn btn-sm btn-outline-secondary" title="Right"><i class="bi bi-text-right"></i></button>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:0.75rem; color:#bbb; margin-bottom:4px;">Vertical align</div>
+        <div style="display:flex; gap:4px;">
+          <button id="ctx-valign-top" class="btn btn-sm btn-outline-secondary" title="Top"><i class="bi bi-align-top"></i></button>
+          <button id="ctx-valign-middle" class="btn btn-sm btn-outline-secondary" title="Middle"><i class="bi bi-align-middle"></i></button>
+          <button id="ctx-valign-bottom" class="btn btn-sm btn-outline-secondary" title="Bottom"><i class="bi bi-align-bottom"></i></button>
+        </div>
       </div>
     </div>
     <div data-stroke-row="" style="padding:2px 14px 8px;">
@@ -615,14 +621,16 @@
     }
 
     // ── Context menu ─────────────────────────────────────────────
-    const ctxMenu       = document.getElementById('ctx-menu');
-    const ctxDelete     = document.getElementById('ctx-delete');
-    const ctxFontInput  = document.getElementById('ctx-fontsize');
+    const ctxMenu         = document.getElementById('ctx-menu');
+    const ctxDelete       = document.getElementById('ctx-delete');
+    const ctxSizesRow     = document.getElementById('ctx-sizes-row');
+    const ctxAlignsRow    = document.getElementById('ctx-aligns-row');
+    const ctxFontInput    = document.getElementById('ctx-fontsize');
     const ctxTextHeightInput = document.getElementById('ctx-textheight');
-    const ctxStrokeInput = document.getElementById('ctx-strokewidth');
-    const ctxAlignLeft  = document.getElementById('ctx-align-left');
-    const ctxAlignCenter = document.getElementById('ctx-align-center');
-    const ctxAlignRight = document.getElementById('ctx-align-right');
+    const ctxStrokeInput  = document.getElementById('ctx-strokewidth');
+    const ctxAlignLeft    = document.getElementById('ctx-align-left');
+    const ctxAlignCenter  = document.getElementById('ctx-align-center');
+    const ctxAlignRight   = document.getElementById('ctx-align-right');
     const ctxValignTop    = document.getElementById('ctx-valign-top');
     const ctxValignMiddle = document.getElementById('ctx-valign-middle');
     const ctxValignBottom = document.getElementById('ctx-valign-bottom');
@@ -670,27 +678,17 @@
       ctxMenu.style.left = (x + mw > window.innerWidth ? x - mw : x) + 'px';
       ctxMenu.style.top = (y + mh > window.innerHeight ? y - mh : y) + 'px';
 
-      const hasFontSize = cls === 'Text';
-      const hasTextHeight = cls === 'Text';
-      const hasAlign = cls === 'Text';
-      const hasStrokeWidth = cls === 'Line';
-      ctxMenu.querySelectorAll('[data-fontsize-row]').forEach(el => {
-        el.style.display = hasFontSize ? '' : 'none';
-      });
-      ctxMenu.querySelectorAll('[data-textheight-row]').forEach(el => {
-        el.style.display = hasTextHeight ? '' : 'none';
-      });
-      ctxMenu.querySelectorAll('[data-align-row]').forEach(el => {
-        el.style.display = hasAlign ? '' : 'none';
-      });
-      ctxMenu.querySelectorAll('[data-valign-row]').forEach(el => {
-        el.style.display = hasAlign ? '' : 'none';
-      });
+      const isText = cls === 'Text';
+      const isLine = cls === 'Line';
+      // Show font size + area height row (flex layout) for text nodes
+      ctxSizesRow.style.display = isText ? 'flex' : 'none';
+      // Show alignment row (flex layout) for text nodes
+      ctxAlignsRow.style.display = isText ? 'flex' : 'none';
       ctxMenu.querySelectorAll('[data-stroke-row]').forEach(el => {
-        el.style.display = hasStrokeWidth ? '' : 'none';
+        el.style.display = isLine ? '' : 'none';
       });
 
-      if (hasAlign) {
+      if (isText) {
         setAlignButtonsActive(node.align() || 'left');
         setVerticalAlignButtonsActive(node.verticalAlign() || 'top');
       } else {
@@ -1253,7 +1251,8 @@
         width:     width,
         align:     align,
         verticalAlign: verticalAlign,
-        height:    textHeight !== undefined ? textHeight : stage.height(),
+        // Default height equals font size so the area exactly fits one line of text
+        height:    textHeight !== undefined ? textHeight : fontSize,
         wrap:      'word',
         draggable: true,
       });
@@ -2088,7 +2087,8 @@
               width: n.width,
               align: n.align || 'left',
               verticalAlign: n.verticalAlign || 'top',
-              height: n.height !== undefined ? n.height : stageH,
+              // Default height equals font size (matches the creation-time default)
+              height: n.height !== undefined ? n.height : n.fontSize,
               wrap: 'word',
             });
             offLayer.add(textNode);
