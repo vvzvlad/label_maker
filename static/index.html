@@ -294,7 +294,7 @@
     .preview-thumb img {
       border-radius: 2px;
       border: 1px solid #333;
-      height: 100px;
+      height: 150px;
       width: auto;
     }
     .preview-thumb span {
@@ -551,8 +551,10 @@
     const DEFAULT_FONT_SIZE = 20;
 
     // ── Konva state ─────────────────────────────────────────────────
-    const PX_PER_MM = 96 / 25.4; // 96 DPI screen resolution
-    const PDF_DPI = 600;          // Output resolution for PDF export
+    const PX_PER_MM = 96 / 25.4;        // 96 DPI screen resolution
+    const PDF_DPI = 600;                // Output resolution for PDF export
+    const PREVIEW_PIXEL_RATIO = 3;      // Pixel ratio for preview strip rendering (higher = sharper)
+    const PREVIEW_DEBOUNCE_MS = 10;    // Delay before re-rendering preview strip (ms)
 
     let stage       = null;
     let layer       = null;
@@ -565,7 +567,7 @@
 
     function schedulePreviewUpdate() {
       clearTimeout(previewTimer);
-      previewTimer = setTimeout(renderPreviewStrip, 400);
+      previewTimer = setTimeout(renderPreviewStrip, PREVIEW_DEBOUNCE_MS);
     }
 
     /** Remove and destroy all active custom line endpoint handles. */
@@ -2073,7 +2075,7 @@
       });
     }
 
-    async function renderOffscreenLabel(serializedNodes, row, stageW, stageH, thumbScale) {
+    async function renderOffscreenLabel(serializedNodes, row, stageW, stageH, pixelRatio) {
       const offscreenContainer = document.createElement('div');
       offscreenContainer.style.position = 'absolute';
       offscreenContainer.style.left = '0';
@@ -2192,7 +2194,7 @@
         }
 
         offLayer.batchDraw();
-        const rawDataUrl = offStage.toDataURL({ pixelRatio: thumbScale });
+        const rawDataUrl = offStage.toDataURL({ pixelRatio: pixelRatio });
         return await applyOtsuBinarization(rawDataUrl);
       } finally {
         if (offStage) offStage.destroy();
@@ -2361,12 +2363,11 @@
 
       const stageW = stage.width();
       const stageH = stage.height();
-      const thumbScale = 100 / stageH;
       const serializedNodes = serializeLayerNodes();
       const fragment = document.createDocumentFragment();
 
       for (const row of rows) {
-        const dataUrl = await renderOffscreenLabel(serializedNodes, row, stageW, stageH, thumbScale);
+        const dataUrl = await renderOffscreenLabel(serializedNodes, row, stageW, stageH, PREVIEW_PIXEL_RATIO);
 
         // Create thumbnail element
         const wrapper = document.createElement('div');
