@@ -516,6 +516,9 @@
         class="form-control form-control-sm"
         style="background:#252525; border-color:#333; color:#e0e0e0; width:80px;"
       />
+      <button id="ctx-align-line" class="btn btn-sm btn-outline-secondary mt-2" style="width:100%;">
+        <i class="bi bi-arrows-angle-contract me-1"></i>Align
+      </button>
     </div>
   </div>
 
@@ -628,6 +631,7 @@
     const ctxFontInput    = document.getElementById('ctx-fontsize');
     const ctxTextHeightInput = document.getElementById('ctx-textheight');
     const ctxStrokeInput  = document.getElementById('ctx-strokewidth');
+    const ctxAlignLine    = document.getElementById('ctx-align-line');
     const ctxAlignLeft    = document.getElementById('ctx-align-left');
     const ctxAlignCenter  = document.getElementById('ctx-align-center');
     const ctxAlignRight   = document.getElementById('ctx-align-right');
@@ -748,6 +752,39 @@
       }
     });
     ctxStrokeInput.addEventListener('change', () => schedulePreviewUpdate());
+
+    // Align line to nearest horizontal or vertical axis
+    ctxAlignLine.addEventListener('click', () => {
+      if (!ctxTarget || ctxTarget.getClassName() !== 'Line') return;
+      const line = ctxTarget;
+      const pts = line.points();
+      const transform = line.getAbsoluteTransform();
+      const abs0 = transform.point({ x: pts[0], y: pts[1] });
+      const abs1 = transform.point({ x: pts[2], y: pts[3] });
+      const dx = abs1.x - abs0.x;
+      const dy = abs1.y - abs0.y;
+
+      // Snap to horizontal if |dy| < |dx|, otherwise snap to vertical
+      if (Math.abs(dy) < Math.abs(dx)) {
+        abs1.y = abs0.y; // horizontal alignment
+      } else {
+        abs1.x = abs0.x; // vertical alignment
+      }
+
+      // Rewrite line in canonical form: no rotation/scale, points from origin
+      line.x(abs0.x);
+      line.y(abs0.y);
+      line.points([0, 0, abs1.x - abs0.x, abs1.y - abs0.y]);
+      line.rotation(0);
+      line.scaleX(1);
+      line.scaleY(1);
+
+      clearLineHandles();
+      attachLineHandles(line);
+      layer.batchDraw();
+      schedulePreviewUpdate();
+      hideContextMenu();
+    });
 
     // Text alignment change — apply on button click
     ctxAlignLeft.addEventListener('click', (e) => {
