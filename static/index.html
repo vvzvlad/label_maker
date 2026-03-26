@@ -561,68 +561,12 @@
     let transformer = null;
     let bgRect      = null;
     let previewTimer = null;
-    let activeLineHandles = [];
     let entityColumnCount = 3;
     const imageCache = new Map();
 
     function schedulePreviewUpdate() {
       clearTimeout(previewTimer);
       previewTimer = setTimeout(renderPreviewStrip, PREVIEW_DEBOUNCE_MS);
-    }
-
-    /** Remove and destroy all active custom line endpoint handles. */
-    function clearLineHandles() {
-      activeLineHandles.forEach(handle => handle.destroy());
-      activeLineHandles = [];
-      if (layer) layer.batchDraw();
-    }
-
-    /**
-     * Create two draggable endpoint handles for the given line.
-     * Handles are positioned in stage coordinates and update line points in local coordinates.
-     */
-    function attachLineHandles(line) {
-      clearLineHandles();
-      const pts = line.points();
-
-      const handles = [0, 1].map(idx => {
-        const lx = pts[idx * 2];
-        const ly = pts[idx * 2 + 1];
-        const transform = line.getAbsoluteTransform();
-        const stagePos = transform.point({ x: lx, y: ly });
-
-        const circle = new Konva.Circle({
-          x: stagePos.x,
-          y: stagePos.y,
-          radius: 6,
-          fill: '#5A9A4A',
-          stroke: '#ffffff',
-          strokeWidth: 1.5,
-          draggable: true,
-          name: 'line-handle',
-        });
-        layer.add(circle);
-
-        circle.on('dragmove', () => {
-          const inv = line.getAbsoluteTransform().copy().invert();
-          const localPos = inv.point({ x: circle.x(), y: circle.y() });
-          const newPts = line.points().slice();
-          newPts[idx * 2] = localPos.x;
-          newPts[idx * 2 + 1] = localPos.y;
-          line.points(newPts);
-          layer.batchDraw();
-        });
-
-        circle.on('dragend', schedulePreviewUpdate);
-        circle.on('click tap', (e) => {
-          e.cancelBubble = true;
-        });
-
-        return circle;
-      });
-
-      activeLineHandles.push(...handles);
-      layer.batchDraw();
     }
 
     // ── Context menu ─────────────────────────────────────────────
@@ -711,7 +655,6 @@
     // Delete action
     ctxDelete.addEventListener('click', () => {
       if (ctxTarget) {
-        clearLineHandles();
         ctxTarget.destroy();
         transformer.nodes([]);
         layer.batchDraw();
@@ -781,8 +724,7 @@
       line.scaleX(1);
       line.scaleY(1);
 
-      clearLineHandles();
-      attachLineHandles(line);
+      selectWithTransformer([line], ['middle-left', 'middle-right', 'top-center', 'bottom-center']);
       layer.batchDraw();
       schedulePreviewUpdate();
       hideContextMenu();
@@ -1242,7 +1184,6 @@
         layer = null;
         transformer = null;
         bgRect = null;
-        activeLineHandles = [];
       }
 
       // Create new stage
@@ -1282,7 +1223,6 @@
       stage.on('click tap', (e) => {
         if (e.target === stage || e.target === bgRect) {
           hideContextMenu();
-          clearLineHandles();
           transformer.nodes([]);
           layer.batchDraw();
         }
@@ -1628,7 +1568,7 @@
         points: [cx - 40, cy, cx + 40, cy],
         stroke: '#000000',
         strokeWidth: 2,
-        lineCap: 'round',
+        lineCap: 'square',
         draggable: true,
         hitStrokeWidth: 20, // wider hit area so thin lines are easy to click
       });
@@ -1636,25 +1576,17 @@
 
       line.on('click tap', (e) => {
         e.cancelBubble = true;
-        clearLineHandles();
-        transformer.nodes([]);
-        attachLineHandles(line);
-        layer.batchDraw();
+        selectWithTransformer([line], ['middle-left', 'middle-right', 'top-center', 'bottom-center']);
       });
       line.on('contextmenu', (e) => {
         e.evt.preventDefault();
-        clearLineHandles();
-        attachLineHandles(line);
-        transformer.nodes([]);
-        layer.batchDraw();
+        selectWithTransformer([line], ['middle-left', 'middle-right', 'top-center', 'bottom-center']);
         showContextMenu(e.evt.clientX, e.evt.clientY, line);
       });
       line.on('dragend', schedulePreviewUpdate);
+      line.on('transformend', schedulePreviewUpdate);
 
-      clearLineHandles();
-      transformer.nodes([]);
-      attachLineHandles(line);
-      layer.batchDraw();
+      selectWithTransformer([line], ['middle-left', 'middle-right', 'top-center', 'bottom-center']);
       schedulePreviewUpdate();
     }
 
@@ -1760,7 +1692,7 @@
             scaleY:      n.scaleY      !== undefined ? n.scaleY : 1,
             stroke:      n.stroke      || '#000000',
             strokeWidth: n.strokeWidth || 2,
-            lineCap:     'round',
+            lineCap:     'square',
             draggable:   true,
             hitStrokeWidth: 20, // wider hit area so thin lines are easy to click
           });
@@ -1768,20 +1700,15 @@
 
           line.on('click tap', (e) => {
             e.cancelBubble = true;
-            clearLineHandles();
-            transformer.nodes([]);
-            attachLineHandles(line);
-            layer.batchDraw();
+            selectWithTransformer([line], ['middle-left', 'middle-right', 'top-center', 'bottom-center']);
           });
           line.on('contextmenu', (e) => {
             e.evt.preventDefault();
-            clearLineHandles();
-            attachLineHandles(line);
-            transformer.nodes([]);
-            layer.batchDraw();
+            selectWithTransformer([line], ['middle-left', 'middle-right', 'top-center', 'bottom-center']);
             showContextMenu(e.evt.clientX, e.evt.clientY, line);
           });
           line.on('dragend', schedulePreviewUpdate);
+          line.on('transformend', schedulePreviewUpdate);
           layer.batchDraw();
         }
       });
@@ -2187,7 +2114,7 @@
               scaleY: n.scaleY !== undefined ? n.scaleY : 1,
               stroke: n.stroke || '#000000',
               strokeWidth: n.strokeWidth || 2,
-              lineCap: 'round',
+              lineCap: 'square',
             });
             offLayer.add(lineNode);
           }
@@ -2282,9 +2209,6 @@
       const prevSelected = transformer.nodes().slice();
       transformer.nodes([]);
 
-      // Hide endpoint handles so they don't appear in exported PDF
-      activeLineHandles.forEach(h => h.hide());
-
       for (let idx = 0; idx < rows.length; idx += 1) {
         const row = rows[idx];
         if (idx > 0) doc.addPage([pdfPageWidthMm, pdfPageHeightMm], orientation);
@@ -2339,10 +2263,6 @@
 
       // Restore transformer selection
       transformer.nodes(prevSelected);
-      layer.batchDraw();
-
-      // Restore endpoint handle visibility
-      activeLineHandles.forEach(h => h.show());
       layer.batchDraw();
 
       doc.save('labels.pdf');
