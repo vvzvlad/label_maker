@@ -814,6 +814,23 @@
       if (e.key === 'Escape') hideContextMenu();
     });
 
+    /**
+     * Select the given Konva nodes with the transformer, set anchor types, and
+     * move the transformer to the top of the layer so its anchors are never
+     * occluded by other elements.
+     *
+     * @param {Konva.Node[]} nodes - nodes to select
+     * @param {string[]|null} anchors - anchor names; if null, current setting is kept
+     */
+    function selectWithTransformer(nodes, anchors = null) {
+      if (anchors !== null) {
+        transformer.enabledAnchors(anchors);
+      }
+      transformer.nodes(nodes);
+      transformer.moveToTop();
+      layer.batchDraw();
+    }
+
     function applyZoom() {
       const pct = parseInt(document.getElementById('input-zoom').value, 10);
       const zoom = pct / 100;
@@ -1211,10 +1228,10 @@
       layer.add(bgRect);
 
       // Shared transformer for selection handles
-      // anchorSize is kept small (5px) so anchor hit areas do not overlap thin elements like lines
+      // anchorSize increased to 10px for easier grab; transformer is moved to top on every selection
       transformer = new Konva.Transformer({
         enabledAnchors: ['top-left', 'top-right', 'bottom-left', 'bottom-right'],
-        anchorSize: 5,
+        anchorSize: 7,
         boundBoxFunc: (oldBox, newBox) => newBox,
       });
       layer.add(transformer);
@@ -1262,9 +1279,7 @@
       // Single click → select (attach transformer)
       textNode.on('click tap', (e) => {
         e.cancelBubble = true;
-        transformer.enabledAnchors(['middle-left', 'middle-right', 'top-center', 'bottom-center']);
-        transformer.nodes([textNode]);
-        layer.batchDraw();
+        selectWithTransformer([textNode], ['middle-left', 'middle-right', 'top-center', 'bottom-center']);
       });
 
       // Double-click → in-place textarea editing
@@ -1275,9 +1290,7 @@
       // Right-click → context menu
       textNode.on('contextmenu', (e) => {
         e.evt.preventDefault();
-        transformer.enabledAnchors(['middle-left', 'middle-right', 'top-center', 'bottom-center']);
-        transformer.nodes([textNode]);
-        layer.batchDraw();
+        selectWithTransformer([textNode], ['middle-left', 'middle-right', 'top-center', 'bottom-center']);
         showContextMenu(e.evt.clientX, e.evt.clientY, textNode);
       });
 
@@ -1360,9 +1373,7 @@
         const newText = textarea.value.trim() !== '' ? textarea.value : textNode.text();
         textNode.text(newText);
         textNode.show();
-        transformer.nodes([textNode]);
-        transformer.enabledAnchors(['middle-left', 'middle-right', 'top-center', 'bottom-center']);
-        layer.batchDraw();
+        selectWithTransformer([textNode], ['middle-left', 'middle-right', 'top-center', 'bottom-center']);
         schedulePreviewUpdate();
         textarea.remove();
       }
@@ -1379,9 +1390,7 @@
         if (e.key === 'Escape') {
           committed = true;
           textNode.show();
-          transformer.nodes([textNode]);
-          transformer.enabledAnchors(['middle-left', 'middle-right', 'top-center', 'bottom-center']);
-          layer.batchDraw();
+          selectWithTransformer([textNode], ['middle-left', 'middle-right', 'top-center', 'bottom-center']);
           textarea.remove();
         }
       });
@@ -1396,23 +1405,18 @@
       const cy = stage.height() / 2;
       const node = addTextNodeWithProps('New text', cx - 30, cy - fontSize / 2, fontSize, '#000000');
       // Select the newly created node
-      transformer.nodes([node]);
-      layer.batchDraw();
+      selectWithTransformer([node]);
       schedulePreviewUpdate();
     }
 
     function attachImageNodeHandlers(kImg) {
       kImg.on('click tap', (ev) => {
         ev.cancelBubble = true;
-        transformer.enabledAnchors(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
-        transformer.nodes([kImg]);
-        layer.batchDraw();
+        selectWithTransformer([kImg], ['top-left', 'top-right', 'bottom-left', 'bottom-right']);
       });
       kImg.on('contextmenu', (ev) => {
         ev.evt.preventDefault();
-        transformer.enabledAnchors(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
-        transformer.nodes([kImg]);
-        layer.batchDraw();
+        selectWithTransformer([kImg], ['top-left', 'top-right', 'bottom-left', 'bottom-right']);
         showContextMenu(ev.evt.clientX, ev.evt.clientY, kImg);
       });
       kImg.on('dblclick dbltap', () => {
@@ -1475,9 +1479,7 @@
       layer.add(kImg);
       attachImageNodeHandlers(kImg);
 
-      transformer.enabledAnchors(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
-      transformer.nodes([kImg]);
-      layer.batchDraw();
+      selectWithTransformer([kImg], ['top-left', 'top-right', 'bottom-left', 'bottom-right']);
       schedulePreviewUpdate();
     }
 
@@ -1516,8 +1518,7 @@
           layer.add(kImg);
           attachImageNodeHandlers(kImg);
 
-          transformer.nodes([kImg]);
-          layer.batchDraw();
+          selectWithTransformer([kImg]);
           schedulePreviewUpdate();
         };
         imgEl.src = e.target.result;
@@ -1528,9 +1529,7 @@
     function attachQrNodeHandlers(qrNode) {
       qrNode.on('click tap', (ev) => {
         ev.cancelBubble = true;
-        transformer.enabledAnchors(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
-        transformer.nodes([qrNode]);
-        layer.batchDraw();
+        selectWithTransformer([qrNode], ['top-left', 'top-right', 'bottom-left', 'bottom-right']);
       });
 
       qrNode.on('dblclick dbltap', () => {
@@ -1550,9 +1549,7 @@
 
       qrNode.on('contextmenu', (ev) => {
         ev.evt.preventDefault();
-        transformer.enabledAnchors(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
-        transformer.nodes([qrNode]);
-        layer.batchDraw();
+        selectWithTransformer([qrNode], ['top-left', 'top-right', 'bottom-left', 'bottom-right']);
         showContextMenu(ev.evt.clientX, ev.evt.clientY, qrNode);
       });
 
@@ -1580,9 +1577,7 @@
         layer.add(qrNode);
         attachQrNodeHandlers(qrNode);
 
-        transformer.enabledAnchors(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
-        transformer.nodes([qrNode]);
-        layer.batchDraw();
+        selectWithTransformer([qrNode], ['top-left', 'top-right', 'bottom-left', 'bottom-right']);
         schedulePreviewUpdate();
       });
     }
