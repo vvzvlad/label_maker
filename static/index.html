@@ -1537,6 +1537,15 @@
 
       layer.batchDraw();
       applyZoom();
+
+      // Deselect when clicking on the gray area outside the label canvas
+      document.getElementById('konva-stage-wrap').addEventListener('click', (e) => {
+        if (e.target === document.getElementById('konva-stage-wrap')) {
+          hideContextMenu();
+          transformer.nodes([]);
+          layer.batchDraw();
+        }
+      });
     }
 
     function pushHistory() {
