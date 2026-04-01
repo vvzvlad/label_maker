@@ -473,6 +473,9 @@
     <div id="ctx-delete" style="padding:6px 14px; cursor:pointer; color:#ff6b6b;">
       <i class="bi bi-trash me-2"></i>Delete
     </div>
+    <div id="ctx-duplicate" style="padding:6px 14px; cursor:pointer; color:#e0e0e0;">
+      <i class="bi bi-copy me-2"></i>Duplicate
+    </div>
     <div style="border-top:1px solid #333; margin:4px 0;"></div>
     <!-- Font size + Area height on one row -->
     <div id="ctx-sizes-row" style="padding:6px 14px 8px; display:flex; gap:8px; align-items:flex-end;">
@@ -600,6 +603,7 @@
     // ── Context menu ─────────────────────────────────────────────
     const ctxMenu         = document.getElementById('ctx-menu');
     const ctxDelete       = document.getElementById('ctx-delete');
+    const ctxDuplicate    = document.getElementById('ctx-duplicate');
     const ctxSizesRow     = document.getElementById('ctx-sizes-row');
     const ctxAlignsRow    = document.getElementById('ctx-aligns-row');
     const ctxFontInput    = document.getElementById('ctx-fontsize');
@@ -699,6 +703,127 @@
         schedulePreviewUpdate();
         pushHistory();
       }
+      hideContextMenu();
+    });
+
+    ctxDuplicate.addEventListener('click', () => {
+      const nodesToDuplicate = transformer.nodes().length >= 2
+        ? transformer.nodes().slice()
+        : (ctxTarget ? [ctxTarget] : []);
+
+      const newNodes = [];
+
+      nodesToDuplicate.forEach((node) => {
+        const cls = node.getClassName();
+
+        if (cls === 'Text') {
+          const textNode = addTextNodeWithProps(
+            node.text(),
+            node.x() + 10,
+            node.y() + 10,
+            node.fontSize(),
+            node.fill(),
+            node.width(),
+            node.align(),
+            node.verticalAlign(),
+            node.height(),
+          );
+          textNode.rotation(node.rotation() || 0);
+          textNode.scaleX(node.scaleX() !== undefined ? node.scaleX() : 1);
+          textNode.scaleY(node.scaleY() !== undefined ? node.scaleY() : 1);
+          newNodes.push(textNode);
+          return;
+        }
+
+        if (cls === 'Line') {
+          const line = new Konva.Line({
+            points: node.points().slice(),
+            x: node.x() + 10,
+            y: node.y() + 10,
+            rotation: node.rotation() || 0,
+            scaleX: node.scaleX() !== undefined ? node.scaleX() : 1,
+            scaleY: node.scaleY() !== undefined ? node.scaleY() : 1,
+            stroke: node.stroke(),
+            strokeWidth: node.strokeWidth(),
+            lineCap: node.lineCap() || 'square',
+            draggable: true,
+            hitStrokeWidth: 20,
+          });
+          layer.add(line);
+          attachLineNodeHandlers(line);
+          newNodes.push(line);
+          return;
+        }
+
+        if (cls === 'Image' && node._isQrNode === true) {
+          const qrNode = new Konva.Image({
+            image: node.image(),
+            x: node.x() + 10,
+            y: node.y() + 10,
+            width: node.width(),
+            height: node.height(),
+            rotation: node.rotation() || 0,
+            scaleX: node.scaleX() !== undefined ? node.scaleX() : 1,
+            scaleY: node.scaleY() !== undefined ? node.scaleY() : 1,
+            draggable: true,
+          });
+          qrNode._isQrNode = true;
+          qrNode._qrContent = node._qrContent;
+          layer.add(qrNode);
+          attachQrNodeHandlers(qrNode);
+          newNodes.push(qrNode);
+          return;
+        }
+
+        if (cls === 'Image' && node._isUrlNode === true) {
+          const urlNode = new Konva.Image({
+            image: node.image(),
+            x: node.x() + 10,
+            y: node.y() + 10,
+            width: node.width(),
+            height: node.height(),
+            rotation: node.rotation() || 0,
+            scaleX: node.scaleX() !== undefined ? node.scaleX() : 1,
+            scaleY: node.scaleY() !== undefined ? node.scaleY() : 1,
+            draggable: true,
+          });
+          urlNode._isUrlNode = true;
+          urlNode._srcTemplate = node._srcTemplate;
+          urlNode._srcDataUrl = null;
+          layer.add(urlNode);
+          attachImageNodeHandlers(urlNode);
+          newNodes.push(urlNode);
+          return;
+        }
+
+        if (cls === 'Image') {
+          const imageNode = new Konva.Image({
+            image: node.image(),
+            x: node.x() + 10,
+            y: node.y() + 10,
+            width: node.width(),
+            height: node.height(),
+            rotation: node.rotation() || 0,
+            scaleX: node.scaleX() !== undefined ? node.scaleX() : 1,
+            scaleY: node.scaleY() !== undefined ? node.scaleY() : 1,
+            draggable: true,
+          });
+          imageNode._srcDataUrl = node._srcDataUrl;
+          imageNode._isUrlNode = false;
+          imageNode._srcTemplate = null;
+          layer.add(imageNode);
+          attachImageNodeHandlers(imageNode);
+          newNodes.push(imageNode);
+        }
+      });
+
+      if (newNodes.length > 0) {
+        selectWithTransformer(newNodes);
+        layer.batchDraw();
+        schedulePreviewUpdate();
+        pushHistory();
+      }
+
       hideContextMenu();
     });
 
@@ -1824,7 +1949,14 @@
         hitStrokeWidth: 20, // wider hit area so thin lines are easy to click
       });
       layer.add(line);
+      attachLineNodeHandlers(line);
 
+      selectWithTransformer([line], ['middle-left', 'middle-right', 'top-center', 'bottom-center']);
+      schedulePreviewUpdate();
+      pushHistory();
+    }
+
+    function attachLineNodeHandlers(line) {
       line.on('click tap', (e) => {
         if (e.evt.button === 2) return; // ignore right-clicks
         e.cancelBubble = true;
@@ -1844,10 +1976,6 @@
       });
       line.on('dragend', onDragEnd);
       line.on('transformend', onTransformEnd);
-
-      selectWithTransformer([line], ['middle-left', 'middle-right', 'top-center', 'bottom-center']);
-      schedulePreviewUpdate();
-      pushHistory();
     }
 
     function restoreUrlImageNode(n) {
@@ -1957,26 +2085,7 @@
             hitStrokeWidth: 20, // wider hit area so thin lines are easy to click
           });
           layer.add(line);
-
-          line.on('click tap', (e) => {
-            if (e.evt.button === 2) return; // ignore right-clicks
-            e.cancelBubble = true;
-            const isMultiSelect = e.evt.ctrlKey || e.evt.metaKey;
-            const anchors = isMultiSelect
-              ? ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']
-              : ['middle-left', 'middle-right', 'top-center', 'bottom-center'];
-            selectWithTransformer([line], anchors, isMultiSelect);
-          });
-          line.on('contextmenu', (e) => {
-            e.evt.preventDefault();
-            const currentNodes = transformer.nodes();
-            if (currentNodes.length < 2 || !currentNodes.includes(line)) {
-              selectWithTransformer([line], ['middle-left', 'middle-right', 'top-center', 'bottom-center']);
-            }
-            showContextMenu(e.evt.clientX, e.evt.clientY, line);
-          });
-          line.on('dragend', onDragEnd);
-          line.on('transformend', onTransformEnd);
+          attachLineNodeHandlers(line);
           layer.batchDraw();
         }
       });
