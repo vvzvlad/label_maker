@@ -827,12 +827,42 @@
      *
      * @param {Konva.Node[]} nodes - nodes to select
      * @param {string[]|null} anchors - anchor names; if null, current setting is kept
+     * @param {boolean} addToSelection - when true, toggles first node in/out of current selection
      */
-    function selectWithTransformer(nodes, anchors = null) {
-      if (anchors !== null) {
-        transformer.enabledAnchors(anchors);
+    function selectWithTransformer(nodes, anchors = null, addToSelection = false) {
+      const fullSelectionAnchors = [
+        'top-left', 'top-right', 'bottom-left', 'bottom-right',
+        'middle-left', 'middle-right', 'top-center', 'bottom-center',
+      ];
+
+      if (addToSelection) {
+        const currentNodes = transformer.nodes();
+        const clickedNode = nodes[0];
+        let updatedNodes = currentNodes.slice();
+
+        if (clickedNode) {
+          const existingIndex = updatedNodes.indexOf(clickedNode);
+          if (existingIndex >= 0) {
+            updatedNodes.splice(existingIndex, 1);
+          } else {
+            updatedNodes.push(clickedNode);
+          }
+        }
+
+        if (updatedNodes.length > 1) {
+          transformer.enabledAnchors(fullSelectionAnchors);
+        } else if (anchors !== null) {
+          transformer.enabledAnchors(anchors);
+        }
+
+        transformer.nodes(updatedNodes);
+      } else {
+        if (anchors !== null) {
+          transformer.enabledAnchors(anchors);
+        }
+        transformer.nodes(nodes);
       }
-      transformer.nodes(nodes);
+
       transformer.moveToTop();
       layer.batchDraw();
     }
@@ -1283,7 +1313,11 @@
       // Single click → select (attach transformer)
       textNode.on('click tap', (e) => {
         e.cancelBubble = true;
-        selectWithTransformer([textNode], ['middle-left', 'middle-right', 'top-center', 'bottom-center']);
+        const isMultiSelect = e.evt.ctrlKey || e.evt.metaKey;
+        const anchors = isMultiSelect
+          ? ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']
+          : ['middle-left', 'middle-right', 'top-center', 'bottom-center'];
+        selectWithTransformer([textNode], anchors, isMultiSelect);
       });
 
       // Double-click → in-place textarea editing
@@ -1416,7 +1450,11 @@
     function attachImageNodeHandlers(kImg) {
       kImg.on('click tap', (ev) => {
         ev.cancelBubble = true;
-        selectWithTransformer([kImg], ['top-left', 'top-right', 'bottom-left', 'bottom-right']);
+        const isMultiSelect = ev.evt.ctrlKey || ev.evt.metaKey;
+        const anchors = isMultiSelect
+          ? ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']
+          : ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
+        selectWithTransformer([kImg], anchors, isMultiSelect);
       });
       kImg.on('contextmenu', (ev) => {
         ev.evt.preventDefault();
@@ -1533,7 +1571,11 @@
     function attachQrNodeHandlers(qrNode) {
       qrNode.on('click tap', (ev) => {
         ev.cancelBubble = true;
-        selectWithTransformer([qrNode], ['top-left', 'top-right', 'bottom-left', 'bottom-right']);
+        const isMultiSelect = ev.evt.ctrlKey || ev.evt.metaKey;
+        const anchors = isMultiSelect
+          ? ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']
+          : ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
+        selectWithTransformer([qrNode], anchors, isMultiSelect);
       });
 
       qrNode.on('dblclick dbltap', () => {
@@ -1601,7 +1643,11 @@
 
       line.on('click tap', (e) => {
         e.cancelBubble = true;
-        selectWithTransformer([line], ['middle-left', 'middle-right', 'top-center', 'bottom-center']);
+        const isMultiSelect = e.evt.ctrlKey || e.evt.metaKey;
+        const anchors = isMultiSelect
+          ? ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']
+          : ['middle-left', 'middle-right', 'top-center', 'bottom-center'];
+        selectWithTransformer([line], anchors, isMultiSelect);
       });
       line.on('contextmenu', (e) => {
         e.evt.preventDefault();
@@ -1725,7 +1771,11 @@
 
           line.on('click tap', (e) => {
             e.cancelBubble = true;
-            selectWithTransformer([line], ['middle-left', 'middle-right', 'top-center', 'bottom-center']);
+            const isMultiSelect = e.evt.ctrlKey || e.evt.metaKey;
+            const anchors = isMultiSelect
+              ? ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']
+              : ['middle-left', 'middle-right', 'top-center', 'bottom-center'];
+            selectWithTransformer([line], anchors, isMultiSelect);
           });
           line.on('contextmenu', (e) => {
             e.evt.preventDefault();
