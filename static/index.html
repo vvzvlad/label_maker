@@ -520,6 +520,21 @@
         <i class="bi bi-arrows-angle-contract me-1"></i>Align
       </button>
     </div>
+    <!-- Multi-element alignment section — shown only when 2+ elements are selected -->
+    <div id="ctx-multi-align" style="display:none; padding:2px 14px 8px;">
+      <div style="border-top:1px solid #333; margin:4px 0 6px;"></div>
+      <div style="font-size:0.75rem; color:#bbb; margin-bottom:4px;">Align selected</div>
+      <div style="display:flex; gap:4px; margin-bottom:4px;">
+        <button id="ctx-multi-align-left" class="btn btn-sm btn-outline-secondary" title="Align left edges"><i class="bi bi-align-start"></i></button>
+        <button id="ctx-multi-align-center" class="btn btn-sm btn-outline-secondary" title="Align centers (horizontal)"><i class="bi bi-align-center"></i></button>
+        <button id="ctx-multi-align-right" class="btn btn-sm btn-outline-secondary" title="Align right edges"><i class="bi bi-align-end"></i></button>
+      </div>
+      <div style="display:flex; gap:4px;">
+        <button id="ctx-multi-align-top" class="btn btn-sm btn-outline-secondary" title="Align top edges"><i class="bi bi-align-top"></i></button>
+        <button id="ctx-multi-align-middle" class="btn btn-sm btn-outline-secondary" title="Align centers (vertical)"><i class="bi bi-align-middle"></i></button>
+        <button id="ctx-multi-align-bottom" class="btn btn-sm btn-outline-secondary" title="Align bottom edges"><i class="bi bi-align-bottom"></i></button>
+      </div>
+    </div>
   </div>
 
   <!-- Bootstrap JS -->
@@ -584,7 +599,9 @@
     const ctxValignTop    = document.getElementById('ctx-valign-top');
     const ctxValignMiddle = document.getElementById('ctx-valign-middle');
     const ctxValignBottom = document.getElementById('ctx-valign-bottom');
+    const ctxMultiAlign   = document.getElementById('ctx-multi-align');
     let ctxTarget       = null;
+    let ctxIsMultiSelect = false;
 
     function setAlignButtonsActive(align) {
       const value = align || 'left';
@@ -615,6 +632,7 @@
     /** Show context menu near the given screen position for the given node. */
     function showContextMenu(x, y, node) {
       ctxTarget = node;
+      ctxIsMultiSelect = transformer.nodes().length >= 2;
       const cls = node.getClassName();
 
       ctxFontInput.value = cls === 'Text' ? node.fontSize() : '';
@@ -630,13 +648,15 @@
 
       const isText = cls === 'Text';
       const isLine = cls === 'Line';
+      const isMulti = ctxIsMultiSelect;
       // Show font size + area height row (flex layout) for text nodes
-      ctxSizesRow.style.display = isText ? 'flex' : 'none';
+      ctxSizesRow.style.display = (!isMulti && isText) ? 'flex' : 'none';
       // Show alignment row (flex layout) for text nodes
-      ctxAlignsRow.style.display = isText ? 'flex' : 'none';
+      ctxAlignsRow.style.display = (!isMulti && isText) ? 'flex' : 'none';
       ctxMenu.querySelectorAll('[data-stroke-row]').forEach(el => {
-        el.style.display = isLine ? '' : 'none';
+        el.style.display = (!isMulti && isLine) ? '' : 'none';
       });
+      ctxMultiAlign.style.display = isMulti ? '' : 'none';
 
       if (isText) {
         setAlignButtonsActive(node.align() || 'left');
@@ -650,18 +670,76 @@
     function hideContextMenu() {
       ctxMenu.style.display = 'none';
       ctxTarget = null;
+      ctxIsMultiSelect = false;
     }
 
     // Delete action
     ctxDelete.addEventListener('click', () => {
-      if (ctxTarget) {
-        ctxTarget.destroy();
+      const nodesToDelete = transformer.nodes().length >= 2
+        ? transformer.nodes().slice()
+        : (ctxTarget ? [ctxTarget] : []);
+
+      if (nodesToDelete.length > 0) {
+        nodesToDelete.forEach((node) => node.destroy());
         transformer.nodes([]);
         layer.batchDraw();
         schedulePreviewUpdate();
       }
       hideContextMenu();
     });
+
+    function alignSelectedNodes(type) {
+      const nodes = transformer.nodes();
+      if (nodes.length < 2) return;
+
+      // Get bounding rects for all selected nodes in layer coordinates
+      const rects = nodes.map(node => node.getClientRect({ relativeTo: layer }));
+
+      let targetValue;
+      switch (type) {
+        case 'left':
+          targetValue = Math.min(...rects.map(r => r.x));
+          break;
+        case 'center':
+          targetValue = (Math.min(...rects.map(r => r.x)) + Math.max(...rects.map(r => r.x + r.width))) / 2;
+          break;
+        case 'right':
+          targetValue = Math.max(...rects.map(r => r.x + r.width));
+          break;
+        case 'top':
+          targetValue = Math.min(...rects.map(r => r.y));
+          break;
+        case 'middle':
+          targetValue = (Math.min(...rects.map(r => r.y)) + Math.max(...rects.map(r => r.y + r.height))) / 2;
+          break;
+        case 'bottom':
+          targetValue = Math.max(...rects.map(r => r.y + r.height));
+          break;
+        default:
+          return;
+      }
+
+      nodes.forEach((node, index) => {
+        const rect = rects[index];
+        if (type === 'left') node.x(node.x() + (targetValue - rect.x));
+        if (type === 'center') node.x(node.x() + (targetValue - (rect.x + rect.width / 2)));
+        if (type === 'right') node.x(node.x() + (targetValue - (rect.x + rect.width)));
+        if (type === 'top') node.y(node.y() + (targetValue - rect.y));
+        if (type === 'middle') node.y(node.y() + (targetValue - (rect.y + rect.height / 2)));
+        if (type === 'bottom') node.y(node.y() + (targetValue - (rect.y + rect.height)));
+      });
+
+      layer.batchDraw();
+      schedulePreviewUpdate();
+      hideContextMenu();
+    }
+
+    document.getElementById('ctx-multi-align-left').addEventListener('click', () => alignSelectedNodes('left'));
+    document.getElementById('ctx-multi-align-center').addEventListener('click', () => alignSelectedNodes('center'));
+    document.getElementById('ctx-multi-align-right').addEventListener('click', () => alignSelectedNodes('right'));
+    document.getElementById('ctx-multi-align-top').addEventListener('click', () => alignSelectedNodes('top'));
+    document.getElementById('ctx-multi-align-middle').addEventListener('click', () => alignSelectedNodes('middle'));
+    document.getElementById('ctx-multi-align-bottom').addEventListener('click', () => alignSelectedNodes('bottom'));
 
     // Font size change — apply live on input
     ctxFontInput.addEventListener('input', () => {
@@ -1328,7 +1406,10 @@
       // Right-click → context menu
       textNode.on('contextmenu', (e) => {
         e.evt.preventDefault();
-        selectWithTransformer([textNode], ['middle-left', 'middle-right', 'top-center', 'bottom-center']);
+        const currentNodes = transformer.nodes();
+        if (currentNodes.length < 2 || !currentNodes.includes(textNode)) {
+          selectWithTransformer([textNode], ['middle-left', 'middle-right', 'top-center', 'bottom-center']);
+        }
         showContextMenu(e.evt.clientX, e.evt.clientY, textNode);
       });
 
@@ -1458,7 +1539,10 @@
       });
       kImg.on('contextmenu', (ev) => {
         ev.evt.preventDefault();
-        selectWithTransformer([kImg], ['top-left', 'top-right', 'bottom-left', 'bottom-right']);
+        const currentNodes = transformer.nodes();
+        if (currentNodes.length < 2 || !currentNodes.includes(kImg)) {
+          selectWithTransformer([kImg], ['top-left', 'top-right', 'bottom-left', 'bottom-right']);
+        }
         showContextMenu(ev.evt.clientX, ev.evt.clientY, kImg);
       });
       kImg.on('dblclick dbltap', () => {
@@ -1595,7 +1679,10 @@
 
       qrNode.on('contextmenu', (ev) => {
         ev.evt.preventDefault();
-        selectWithTransformer([qrNode], ['top-left', 'top-right', 'bottom-left', 'bottom-right']);
+        const currentNodes = transformer.nodes();
+        if (currentNodes.length < 2 || !currentNodes.includes(qrNode)) {
+          selectWithTransformer([qrNode], ['top-left', 'top-right', 'bottom-left', 'bottom-right']);
+        }
         showContextMenu(ev.evt.clientX, ev.evt.clientY, qrNode);
       });
 
@@ -1651,7 +1738,10 @@
       });
       line.on('contextmenu', (e) => {
         e.evt.preventDefault();
-        selectWithTransformer([line], ['middle-left', 'middle-right', 'top-center', 'bottom-center']);
+        const currentNodes = transformer.nodes();
+        if (currentNodes.length < 2 || !currentNodes.includes(line)) {
+          selectWithTransformer([line], ['middle-left', 'middle-right', 'top-center', 'bottom-center']);
+        }
         showContextMenu(e.evt.clientX, e.evt.clientY, line);
       });
       line.on('dragend', schedulePreviewUpdate);
@@ -1779,7 +1869,10 @@
           });
           line.on('contextmenu', (e) => {
             e.evt.preventDefault();
-            selectWithTransformer([line], ['middle-left', 'middle-right', 'top-center', 'bottom-center']);
+            const currentNodes = transformer.nodes();
+            if (currentNodes.length < 2 || !currentNodes.includes(line)) {
+              selectWithTransformer([line], ['middle-left', 'middle-right', 'top-center', 'bottom-center']);
+            }
             showContextMenu(e.evt.clientX, e.evt.clientY, line);
           });
           line.on('dragend', schedulePreviewUpdate);
