@@ -793,6 +793,31 @@
     });
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') hideContextMenu();
+
+      // Arrow key nudging: move selected nodes by 1px per keypress.
+      // Skip when focus is inside text inputs to avoid interfering with typing.
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+      const arrows = {
+        ArrowLeft: [-1, 0],
+        ArrowRight: [1, 0],
+        ArrowUp: [0, -1],
+        ArrowDown: [0, 1],
+      };
+      const delta = arrows[e.key];
+      if (!delta) return;
+
+      const nodes = transformer?.nodes();
+      if (!nodes || nodes.length === 0) return;
+
+      e.preventDefault(); // Prevent page scrolling on arrow keys when nudging.
+      nodes.forEach((node) => {
+        node.x(node.x() + delta[0]);
+        node.y(node.y() + delta[1]);
+      });
+      layer.batchDraw();
+      schedulePreviewUpdate();
     });
 
     /**
