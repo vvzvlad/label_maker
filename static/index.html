@@ -1690,6 +1690,7 @@
       });
 
       qrNode.on('dragend', schedulePreviewUpdate);
+      qrNode.on('transformend', schedulePreviewUpdate);
     }
 
     function addQrNode() {
