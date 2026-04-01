@@ -1390,6 +1390,7 @@
 
       // Single click → select (attach transformer)
       textNode.on('click tap', (e) => {
+        if (e.evt.button === 2) return; // ignore right-clicks; contextmenu handler handles them
         e.cancelBubble = true;
         const isMultiSelect = e.evt.ctrlKey || e.evt.metaKey;
         const anchors = isMultiSelect
@@ -1530,6 +1531,7 @@
 
     function attachImageNodeHandlers(kImg) {
       kImg.on('click tap', (ev) => {
+        if (ev.evt.button === 2) return; // ignore right-clicks
         ev.cancelBubble = true;
         const isMultiSelect = ev.evt.ctrlKey || ev.evt.metaKey;
         const anchors = isMultiSelect
@@ -1654,6 +1656,7 @@
 
     function attachQrNodeHandlers(qrNode) {
       qrNode.on('click tap', (ev) => {
+        if (ev.evt.button === 2) return; // ignore right-clicks
         ev.cancelBubble = true;
         const isMultiSelect = ev.evt.ctrlKey || ev.evt.metaKey;
         const anchors = isMultiSelect
@@ -1729,6 +1732,7 @@
       layer.add(line);
 
       line.on('click tap', (e) => {
+        if (e.evt.button === 2) return; // ignore right-clicks
         e.cancelBubble = true;
         const isMultiSelect = e.evt.ctrlKey || e.evt.metaKey;
         const anchors = isMultiSelect
@@ -1860,6 +1864,7 @@
           layer.add(line);
 
           line.on('click tap', (e) => {
+            if (e.evt.button === 2) return; // ignore right-clicks
             e.cancelBubble = true;
             const isMultiSelect = e.evt.ctrlKey || e.evt.metaKey;
             const anchors = isMultiSelect
