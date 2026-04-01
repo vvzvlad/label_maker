@@ -1553,6 +1553,7 @@
         }
       });
       kImg.on('dragend', schedulePreviewUpdate);
+      kImg.on('transformend', schedulePreviewUpdate);
     }
 
     async function editUrlNodeTemplate(node) {
