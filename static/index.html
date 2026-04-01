@@ -1050,6 +1050,20 @@
         return;
       }
 
+      // Delete/Backspace: remove all currently selected canvas nodes.
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        const nodesToDelete = transformer.nodes().slice();
+        if (nodesToDelete.length > 0) {
+          e.preventDefault();
+          nodesToDelete.forEach((node) => node.destroy());
+          transformer.nodes([]);
+          layer.batchDraw();
+          schedulePreviewUpdate();
+          pushHistory();
+        }
+        return;
+      }
+
       const arrows = {
         ArrowLeft: [-1, 0],
         ArrowRight: [1, 0],
