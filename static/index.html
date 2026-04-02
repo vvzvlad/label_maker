@@ -1693,26 +1693,19 @@
       textarea.style.background = 'rgba(255,255,255,0.92)';
       textarea.style.border     = '1px solid #5A9A4A';
       textarea.style.borderRadius = '2px';
-      textarea.style.padding    = '2px 4px';
+      textarea.style.padding    = '0';
       textarea.style.margin     = '0';
       textarea.style.lineHeight = '1.2';
       textarea.style.fontFamily = 'sans-serif';
-      textarea.style.minWidth   = '60px';
+      // Fix textarea dimensions to match the Konva text node dimensions (scaled by CSS zoom)
+      textarea.style.width      = (textNode.width()  * cssZoom) + 'px';
+      textarea.style.height     = (textNode.height() * cssZoom) + 'px';
       textarea.style.outline    = 'none';
       textarea.style.resize     = 'none';
-      textarea.style.overflow   = 'hidden';
+      textarea.style.overflow   = 'auto';
       textarea.style.zIndex     = '10000';
       textarea.style.whiteSpace = 'pre-wrap';
-
-      // Auto-size textarea width/height to content
-      function resize() {
-        textarea.style.width  = 'auto';
-        textarea.style.height = 'auto';
-        textarea.style.width  = textarea.scrollWidth  + 'px';
-        textarea.style.height = textarea.scrollHeight + 'px';
-      }
-      resize();
-      textarea.addEventListener('input', resize);
+      textarea.style.boxSizing  = 'border-box';
 
       textarea.focus();
       textarea.select();
