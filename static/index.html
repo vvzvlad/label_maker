@@ -3002,7 +3002,11 @@
 
     /** Write presets array to localStorage. */
     function savePresets(presets) {
-      localStorage.setItem('lm_presets', JSON.stringify(presets));
+      try {
+        localStorage.setItem('lm_presets', JSON.stringify(presets));
+      } catch (e) {
+        showToast('Failed to save preset: storage quota exceeded.', 'danger');
+      }
     }
 
     /** Capture the current app state as a preset-compatible object. */
@@ -3035,6 +3039,7 @@
       const tpl = preset.template;
       const tbl = preset.table;
 
+      // Keep in sync with the loadTemplate() file-reader callback
       // Restore template (same logic as loadTemplate file reader callback)
       if (tpl) {
         if (tpl.widthMm) inputWidth.value = tpl.widthMm;
@@ -3089,20 +3094,35 @@
           : '';
         const item = document.createElement('div');
         item.className = 'preset-item';
-        item.innerHTML = `
-          <div class="preset-item-info">
-            <div class="preset-item-name" title="${preset.name || ''}">${preset.name || '(unnamed)'}</div>
-            <div class="preset-item-date">${dateStr}</div>
-          </div>
-          <div class="preset-item-actions">
-            <button type="button" class="btn btn-outline-secondary btn-sm btn-load-preset" data-index="${index}">
-              <i class="bi bi-box-arrow-in-down me-1"></i>Load
-            </button>
-            <button type="button" class="btn btn-outline-danger btn-sm btn-delete-preset" data-index="${index}">
-              <i class="bi bi-trash me-1"></i>Delete
-            </button>
-          </div>
+        // Build info section safely to prevent XSS via preset names
+        const infoDiv = document.createElement('div');
+        infoDiv.className = 'preset-item-info';
+
+        const nameEl = document.createElement('div');
+        nameEl.className = 'preset-item-name';
+        nameEl.textContent = preset.name || '(unnamed)'; // safe assignment
+        nameEl.title = preset.name || '';               // safe assignment
+
+        const dateEl = document.createElement('div');
+        dateEl.className = 'preset-item-date';
+        dateEl.textContent = dateStr;                   // safe assignment
+
+        infoDiv.appendChild(nameEl);
+        infoDiv.appendChild(dateEl);
+        item.appendChild(infoDiv);
+
+        // Actions section uses only static HTML with numeric data-index — safe to use innerHTML
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'preset-item-actions';
+        actionsDiv.innerHTML = `
+          <button type="button" class="btn btn-outline-secondary btn-sm btn-load-preset" data-index="${index}">
+            <i class="bi bi-box-arrow-in-down me-1"></i>Load
+          </button>
+          <button type="button" class="btn btn-outline-danger btn-sm btn-delete-preset" data-index="${index}">
+            <i class="bi bi-trash me-1"></i>Delete
+          </button>
         `;
+        item.appendChild(actionsDiv);
         body.appendChild(item);
       });
 
@@ -3122,6 +3142,7 @@
       // Attach Delete button handlers
       body.querySelectorAll('.btn-delete-preset').forEach((btn) => {
         btn.addEventListener('click', () => {
+          btn.disabled = true; // prevent double-click race condition
           const idx = parseInt(btn.dataset.index, 10);
           const currentPresets = loadPresets();
           currentPresets.splice(idx, 1);
