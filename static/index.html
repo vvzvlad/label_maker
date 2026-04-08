@@ -1180,8 +1180,8 @@
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         hideContextMenu();
-        // Close PDF modal if it is open
-        if (document.getElementById('pdf-modal').style.display !== 'none') closePdfModal();
+        // Use boolean flag instead of fragile style.display check
+        if (pdfModal.isOpen) closePdfModal();
       }
 
       // Arrow key nudging: move selected nodes by 1px per keypress.
@@ -2823,23 +2823,26 @@
 
     // ── PDF viewer modal ─────────────────────────────────────────────
 
-    let currentPdfBlobUrl = null;
+    // Encapsulate modal state in a single object to avoid polluting the global scope
+    const pdfModal = { blobUrl: null, isOpen: false };
 
     function openPdfModal(blobUrl) {
       // Store blob URL for later revocation on close
-      currentPdfBlobUrl = blobUrl;
+      pdfModal.blobUrl = blobUrl;
+      pdfModal.isOpen = true;
       document.getElementById('pdf-modal-iframe').src = blobUrl;
       document.getElementById('pdf-modal').style.display = 'flex';
       document.body.style.overflow = 'hidden'; // prevent background scroll
     }
 
     function closePdfModal() {
+      pdfModal.isOpen = false;
       document.getElementById('pdf-modal').style.display = 'none';
       document.getElementById('pdf-modal-iframe').src = ''; // stop loading
       document.body.style.overflow = ''; // restore scroll
-      if (currentPdfBlobUrl) {
-        URL.revokeObjectURL(currentPdfBlobUrl); // free memory
-        currentPdfBlobUrl = null;
+      if (pdfModal.blobUrl) {
+        URL.revokeObjectURL(pdfModal.blobUrl); // free memory
+        pdfModal.blobUrl = null;
       }
     }
 
