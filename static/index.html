@@ -318,6 +318,67 @@
       right: 20px;
       z-index: 9999;
     }
+
+    /* ── PDF viewer modal overlay ── */
+    #pdf-modal {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      z-index: 100000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    #pdf-modal-backdrop {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.75);
+    }
+    #pdf-modal-container {
+      position: relative;
+      width: 95vw;
+      height: 92vh;
+      background: #1e1e1e;
+      border: 1px solid #333;
+      border-radius: 6px;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7);
+      overflow: hidden;
+    }
+    #pdf-modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      background: #2a2a2a;
+      border-bottom: 1px solid #333;
+      flex-shrink: 0;
+    }
+    #pdf-modal-header span {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #e0e0e0;
+    }
+    #pdf-modal-close {
+      background: #5A9A4A;
+      border: none;
+      border-radius: 4px;
+      color: #fff;
+      font-size: 0.82rem;
+      padding: 5px 12px;
+      cursor: pointer;
+      font-weight: 500;
+      transition: background 0.15s;
+    }
+    #pdf-modal-close:hover {
+      background: #4e8840;
+    }
+    #pdf-modal-iframe {
+      flex: 1 1 0;
+      width: 100%;
+      border: none;
+      background: #fff;
+    }
   </style>
 </head>
 <body>
@@ -537,6 +598,18 @@
         <button id="ctx-multi-align-middle" class="btn btn-sm btn-outline-secondary" title="Align centers (vertical)"><i class="bi bi-align-middle"></i></button>
         <button id="ctx-multi-align-bottom" class="btn btn-sm btn-outline-secondary" title="Align bottom edges"><i class="bi bi-align-bottom"></i></button>
       </div>
+    </div>
+  </div>
+
+  <!-- PDF viewer modal overlay -->
+  <div id="pdf-modal" style="display:none;">
+    <div id="pdf-modal-backdrop"></div>
+    <div id="pdf-modal-container">
+      <div id="pdf-modal-header">
+        <span>PDF Preview</span>
+        <button id="pdf-modal-close">✕ Close</button>
+      </div>
+      <iframe id="pdf-modal-iframe" title="PDF Preview"></iframe>
     </div>
   </div>
 
@@ -1026,7 +1099,11 @@
       if (!ctxMenu.contains(e.target)) hideContextMenu();
     });
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') hideContextMenu();
+      if (e.key === 'Escape') {
+        hideContextMenu();
+        // Close PDF modal if it is open
+        if (document.getElementById('pdf-modal').style.display !== 'none') closePdfModal();
+      }
 
       // Arrow key nudging: move selected nodes by 1px per keypress.
       // Skip when focus is inside text inputs to avoid interfering with typing.
@@ -2659,9 +2736,36 @@
       transformer.nodes(prevSelected);
       layer.batchDraw();
 
-      doc.save('labels.pdf');
+      // Open PDF in viewer overlay instead of downloading
+      const pdfBlobUrl = doc.output('bloburl');
+      openPdfModal(pdfBlobUrl);
       showToast(`PDF with ${rows.length} label${rows.length > 1 ? 's' : ''} generated!`, 'success');
     }
+
+    // ── PDF viewer modal ─────────────────────────────────────────────
+
+    let currentPdfBlobUrl = null;
+
+    function openPdfModal(blobUrl) {
+      // Store blob URL for later revocation on close
+      currentPdfBlobUrl = blobUrl;
+      document.getElementById('pdf-modal-iframe').src = blobUrl;
+      document.getElementById('pdf-modal').style.display = 'flex';
+      document.body.style.overflow = 'hidden'; // prevent background scroll
+    }
+
+    function closePdfModal() {
+      document.getElementById('pdf-modal').style.display = 'none';
+      document.getElementById('pdf-modal-iframe').src = ''; // stop loading
+      document.body.style.overflow = ''; // restore scroll
+      if (currentPdfBlobUrl) {
+        URL.revokeObjectURL(currentPdfBlobUrl); // free memory
+        currentPdfBlobUrl = null;
+      }
+    }
+
+    document.getElementById('pdf-modal-close').addEventListener('click', closePdfModal);
+    document.getElementById('pdf-modal-backdrop').addEventListener('click', closePdfModal);
 
     async function renderPreviewStrip() {
       autoSaveTemplate();
