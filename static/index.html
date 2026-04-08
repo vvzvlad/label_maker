@@ -379,6 +379,62 @@
       border: none;
       background: #fff;
     }
+
+    /* ── Presets modal ── */
+    .presets-modal .modal-content {
+      background: #1e1e1e;
+      border-color: #333;
+    }
+    .presets-modal .modal-header {
+      background: #252525;
+      border-bottom-color: #333;
+    }
+    .presets-modal .modal-footer {
+      background: #252525;
+      border-top-color: #333;
+    }
+    .preset-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 8px 12px;
+      background: #252525;
+      border: 1px solid #333;
+      border-radius: 4px;
+      margin-bottom: 6px;
+    }
+    .preset-item:last-child {
+      margin-bottom: 0;
+    }
+    .preset-item-info {
+      flex: 1;
+      min-width: 0;
+    }
+    .preset-item-name {
+      font-size: 0.88rem;
+      color: #e0e0e0;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .preset-item-date {
+      font-size: 0.72rem;
+      color: #888;
+      white-space: nowrap;
+    }
+    .preset-item-actions {
+      display: flex;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .presets-empty {
+      padding: 20px;
+      text-align: center;
+      color: #666;
+      font-size: 0.88rem;
+    }
   </style>
 </head>
 <body>
@@ -449,6 +505,9 @@
         </button>
         <button class="btn btn-outline-secondary btn-sm flex-fill" onclick="document.getElementById('tpl-upload').click()">
           <i class="bi bi-upload me-1"></i> Load Template
+        </button>
+        <button class="btn btn-outline-secondary btn-sm flex-fill" onclick="openPresetsModal()">
+          <i class="bi bi-bookmark me-1"></i> Presets
         </button>
         <button id="btn-clear-table" type="button" class="btn btn-outline-danger btn-sm">
           <i class="bi bi-x-circle me-1"></i>Clear
@@ -610,6 +669,26 @@
         <button id="pdf-modal-close">✕ Close</button>
       </div>
       <iframe id="pdf-modal-iframe" title="PDF Preview"></iframe>
+    </div>
+  </div>
+
+  <!-- Presets modal -->
+  <div class="modal fade presets-modal" id="presets-modal" tabindex="-1" aria-labelledby="presetsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="presetsModalLabel"><i class="bi bi-bookmark me-2"></i>Presets</h5>
+          <button type="button" id="presets-modal-close" class="btn-close btn-close-white" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" id="presets-modal-body">
+          <!-- Preset list is rendered dynamically by renderPresetsList() -->
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="btn-save-preset" class="btn btn-generate btn-sm w-100">
+            <i class="bi bi-bookmark-plus me-1"></i> Save current state as preset
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -2906,6 +2985,185 @@
 
     inputWidth.addEventListener('input',  handleDimensionChange);
     inputHeight.addEventListener('input', handleDimensionChange);
+
+    // ── Presets management ────────────────────────────────────────────
+
+    /** Read and parse presets array from localStorage. Returns [] on error. */
+    function loadPresets() {
+      try {
+        const raw = localStorage.getItem('lm_presets');
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+
+    /** Write presets array to localStorage. */
+    function savePresets(presets) {
+      localStorage.setItem('lm_presets', JSON.stringify(presets));
+    }
+
+    /** Capture the current app state as a preset-compatible object. */
+    function captureCurrentState() {
+      const nodes = serializeLayerNodes();
+      const widthMm = parseFloat(inputWidth.value) || 58;
+      const heightMm = parseFloat(inputHeight.value) || 40;
+      const zoom = parseInt(document.getElementById('input-zoom').value, 10) || 200;
+
+      // Capture table state (same logic as autoSaveTable but returns the object)
+      const tbody = document.getElementById('entities-tbody');
+      const rows = [];
+      tbody.querySelectorAll('tr').forEach((tr) => {
+        const inputs = tr.querySelectorAll('input.entity-input');
+        const entities = [];
+        for (let i = 0; i < entityColumnCount; i += 1) {
+          entities.push(inputs[i]?.value || '');
+        }
+        rows.push({ entities });
+      });
+
+      return {
+        template: { version: 1, widthMm, heightMm, zoom, nodes },
+        table: { columnCount: entityColumnCount, rows },
+      };
+    }
+
+    /** Restore the app state from a preset object. */
+    function applyPresetState(preset) {
+      const tpl = preset.template;
+      const tbl = preset.table;
+
+      // Restore template (same logic as loadTemplate file reader callback)
+      if (tpl) {
+        if (tpl.widthMm) inputWidth.value = tpl.widthMm;
+        if (tpl.heightMm) inputHeight.value = tpl.heightMm;
+        if (tpl.zoom) {
+          document.getElementById('input-zoom').value = tpl.zoom;
+          document.getElementById('zoom-label').textContent = tpl.zoom + '%';
+        }
+        initStage(false);
+        if (Array.isArray(tpl.nodes)) {
+          restoreSavedNodes(tpl.nodes);
+        }
+        transformer.nodes([]);
+        layer.batchDraw();
+        schedulePreviewUpdate();
+        pushHistory();
+      }
+
+      // Restore table
+      if (tbl) {
+        const tbody = document.getElementById('entities-tbody');
+        tbody.innerHTML = '';
+        entityColumnCount = Number.isInteger(tbl.columnCount) && tbl.columnCount > 0
+          ? tbl.columnCount
+          : 3;
+        renderTableHeader();
+        if (Array.isArray(tbl.rows)) {
+          tbl.rows.forEach((r) => {
+            addEntityRow(r.entities || []);
+          });
+        }
+        updateCounter();
+        schedulePreviewUpdate();
+        autoSaveTable();
+      }
+    }
+
+    /** Render the preset list into the modal body. */
+    function renderPresetsList() {
+      const presets = loadPresets();
+      const body = document.getElementById('presets-modal-body');
+      body.innerHTML = '';
+
+      if (presets.length === 0) {
+        body.innerHTML = '<div class="presets-empty">No saved presets yet.</div>';
+        return;
+      }
+
+      presets.forEach((preset, index) => {
+        const dateStr = preset.createdAt
+          ? new Date(preset.createdAt).toLocaleString()
+          : '';
+        const item = document.createElement('div');
+        item.className = 'preset-item';
+        item.innerHTML = `
+          <div class="preset-item-info">
+            <div class="preset-item-name" title="${preset.name || ''}">${preset.name || '(unnamed)'}</div>
+            <div class="preset-item-date">${dateStr}</div>
+          </div>
+          <div class="preset-item-actions">
+            <button type="button" class="btn btn-outline-secondary btn-sm btn-load-preset" data-index="${index}">
+              <i class="bi bi-box-arrow-in-down me-1"></i>Load
+            </button>
+            <button type="button" class="btn btn-outline-danger btn-sm btn-delete-preset" data-index="${index}">
+              <i class="bi bi-trash me-1"></i>Delete
+            </button>
+          </div>
+        `;
+        body.appendChild(item);
+      });
+
+      // Attach Load button handlers
+      body.querySelectorAll('.btn-load-preset').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const idx = parseInt(btn.dataset.index, 10);
+          const preset = loadPresets()[idx];
+          if (!preset) return;
+          applyPresetState(preset);
+          const modalEl = document.getElementById('presets-modal');
+          bootstrap.Modal.getInstance(modalEl)?.hide();
+          showToast('Preset loaded!', 'success');
+        });
+      });
+
+      // Attach Delete button handlers
+      body.querySelectorAll('.btn-delete-preset').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const idx = parseInt(btn.dataset.index, 10);
+          const currentPresets = loadPresets();
+          currentPresets.splice(idx, 1);
+          savePresets(currentPresets);
+          renderPresetsList();
+        });
+      });
+    }
+
+    /** Open the presets modal and render the preset list. */
+    function openPresetsModal() {
+      renderPresetsList();
+      const modalEl = document.getElementById('presets-modal');
+      const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+      modal.show();
+    }
+
+    /** Prompt for a preset name, capture current state, and save as a new preset. */
+    function saveCurrentAsPreset() {
+      const name = window.prompt('Preset name:', '');
+      if (name === null || name.trim() === '') return;
+
+      const state = captureCurrentState();
+      const presets = loadPresets();
+      presets.push({
+        name: name.trim(),
+        createdAt: new Date().toISOString(),
+        ...state,
+      });
+      savePresets(presets);
+      renderPresetsList();
+      showToast('Preset saved!', 'success');
+    }
+
+    // Wire up presets modal close button
+    document.getElementById('presets-modal-close').addEventListener('click', () => {
+      const modalEl = document.getElementById('presets-modal');
+      bootstrap.Modal.getInstance(modalEl)?.hide();
+    });
+
+    // Wire up "Save current state as preset" button in modal footer
+    document.getElementById('btn-save-preset').addEventListener('click', saveCurrentAsPreset);
 
     // ── Initialise ───────────────────────────────────────────────────
 
