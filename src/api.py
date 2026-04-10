@@ -11,6 +11,7 @@ import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 _static_dir = os.path.join(BASE_DIR, "static")
@@ -29,6 +30,12 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Serve static files; html=True makes StaticFiles return index.html for /
+# Serve static files if static/ directory exists
 if os.path.isdir(_static_dir):
-    app.mount("/", StaticFiles(directory=_static_dir, html=True), name="static")
+    app.mount("/static", StaticFiles(directory=_static_dir), name="static")
+
+
+@app.get("/", include_in_schema=False)
+async def index():
+    index_path = os.path.join(_static_dir, "index.html")
+    return FileResponse(index_path)
