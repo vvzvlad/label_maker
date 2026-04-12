@@ -4,6 +4,7 @@ import {
   DEFAULT_FONT_SIZE, HISTORY_MAX,
 } from './modules/state.js';
 import { initEntityTable, renderTableHeader, addEntityRow, getRows, autoSaveTable, updateCounter } from './modules/entity-table.js';
+import { initTemplate, serializeLayerNodes, saveTemplate, autoSaveTemplate, loadTemplate } from './modules/template.js';
 import {
   isCanvasReadBlocked,
   generateQrDataUrl,
@@ -1286,127 +1287,6 @@ function restoreSavedNodes(nodes) {
   });
 }
 
-function saveTemplate() {
-  const nodes = serializeLayerNodes();
-
-  const tpl = {
-    version: 1,
-    widthMm: parseFloat(inputWidth.value) || 58,
-    heightMm: parseFloat(inputHeight.value) || 40,
-    zoom: parseInt(document.getElementById('input-zoom').value, 10) || 200,
-    columnCount: appState.entityColumnCount,
-    nodes,
-  };
-  const blob = new Blob([JSON.stringify(tpl, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  // Build filename with current date/time: template_YYYY-MM-DD_HH-MM-SS.json
-  const now = new Date();
-  const pad = (n) => String(n).padStart(2, '0');
-  const datePart = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-  const timePart = `${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
-  a.download = `template_${datePart}_${timePart}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function serializeLayerNodes() {
-  if (!appState.layer) return [];
-
-  const nodes = [];
-  appState.layer.getChildren().forEach(node => {
-    const cls = node.getClassName();
-    if (cls === 'Rect' || cls === 'Transformer') return;
-    if (cls === 'Text') {
-      nodes.push({
-        type:     'text',
-        text:     node.text(),
-        x:        node.x(),
-        y:        node.y(),
-        rotation: node.rotation(),
-        scaleX:   node.scaleX(),
-        scaleY:   node.scaleY(),
-        fontSize: node.fontSize(),
-        fill:     node.fill(),
-        width:    node.width(),
-        height:   node.height(),
-        align:    node.align(),
-        verticalAlign: node.verticalAlign(),
-      });
-    } else if (cls === 'Image') {
-      if (node._isQrNode) {
-        nodes.push({
-          type:     'qr',
-          x:        node.x(),
-          y:        node.y(),
-          rotation: node.rotation(),
-          scaleX:   node.scaleX(),
-          scaleY:   node.scaleY(),
-          width:    node.width(),
-          height:   node.height(),
-          content:  node._qrContent,
-        });
-      } else if (node._isUrlNode) {
-        nodes.push({
-          type:        'image',
-          isUrl:       true,
-          urlTemplate: node._srcTemplate,
-          src:         null,
-          x:           node.x(),
-          y:           node.y(),
-          rotation:    node.rotation(),
-          scaleX:      node.scaleX(),
-          scaleY:      node.scaleY(),
-          width:       node.width(),
-          height:      node.height(),
-        });
-      } else {
-        nodes.push({
-          type:     'image',
-          x:        node.x(),
-          y:        node.y(),
-          rotation: node.rotation(),
-          scaleX:   node.scaleX(),
-          scaleY:   node.scaleY(),
-          width:    node.width(),
-          height:   node.height(),
-          src:      node._srcDataUrl,
-        });
-      }
-    } else if (cls === 'Line') {
-      nodes.push({
-        type:        'line',
-        points:      node.points().slice(),
-        x:           node.x(),
-        y:           node.y(),
-        rotation:    node.rotation(),
-        scaleX:      node.scaleX(),
-        scaleY:      node.scaleY(),
-        stroke:      node.stroke(),
-        strokeWidth: node.strokeWidth(),
-      });
-    }
-  });
-
-  return nodes;
-}
-
-/** Persist current template to localStorage. */
-function autoSaveTemplate() {
-  if (!appState.layer) return;
-
-  const nodes = serializeLayerNodes();
-
-  const tpl = {
-    version: 1,
-    widthMm: parseFloat(inputWidth.value) || 58,
-    heightMm: parseFloat(inputHeight.value) || 40,
-    zoom: parseInt(document.getElementById('input-zoom').value, 10) || 200,
-    nodes,
-  };
-  localStorage.setItem('lm_template', JSON.stringify(tpl));
-}
 
 async function renderOffscreenLabel(serializedNodes, row, stageW, stageH, pixelRatio) {
   const offscreenContainer = document.createElement('div');
@@ -1533,43 +1413,6 @@ async function renderOffscreenLabel(serializedNodes, row, stageW, stageH, pixelR
     if (offStage) offStage.destroy();
     offscreenContainer.remove();
   }
-}
-
-function loadTemplate(input) {
-  const file = input.files[0];
-  if (!file) return;
-  input.value = '';
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    try {
-      const tpl = JSON.parse(e.target.result);
-      if (!tpl.nodes || !Array.isArray(tpl.nodes)) throw new Error('Invalid template');
-
-      if (tpl.widthMm) inputWidth.value = tpl.widthMm;
-      if (tpl.heightMm) inputHeight.value = tpl.heightMm;
-      if (tpl.zoom) {
-        document.getElementById('input-zoom').value = tpl.zoom;
-        document.getElementById('zoom-label').textContent = tpl.zoom + '%';
-      }
-      // Restore column count if present in template
-      if (Number.isInteger(tpl.columnCount) && tpl.columnCount > 0) {
-        appState.entityColumnCount = tpl.columnCount;
-      }
-      renderTableHeader();
-
-      initStage(false);
-      restoreSavedNodes(tpl.nodes);
-
-      appState.transformer.nodes([]);
-      appState.layer.batchDraw();
-      schedulePreviewUpdate();
-      pushHistory();
-      showToast('Template loaded!', 'success');
-    } catch (err) {
-      showToast('Failed to load template: ' + err.message, 'danger');
-    }
-  };
-  reader.readAsText(file);
 }
 
 // ── PDF generation ───────────────────────────────────────────────
@@ -1988,6 +1831,13 @@ try {
   initEntityTable({ schedulePreviewUpdate });
 } catch (e) {
   console.error('Failed to initialize entity table:', e);
+}
+
+// Wire template module with all required callbacks.
+try {
+  initTemplate({ initStage, restoreSavedNodes, renderTableHeader, pushHistory, schedulePreviewUpdate });
+} catch (e) {
+  console.error('Failed to initialize template module:', e);
 }
 try {
   const savedTableRaw = localStorage.getItem('lm_table');
