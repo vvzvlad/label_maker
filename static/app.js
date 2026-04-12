@@ -3,6 +3,7 @@ import {
   PX_PER_MM, PDF_DPI, PREVIEW_PIXEL_RATIO, PREVIEW_DEBOUNCE_MS,
   DEFAULT_FONT_SIZE, HISTORY_MAX,
 } from './modules/state.js';
+import { initEntityTable, renderTableHeader, addEntityRow, getRows, autoSaveTable, updateCounter } from './modules/entity-table.js';
 import {
   isCanvasReadBlocked,
   generateQrDataUrl,
@@ -20,7 +21,6 @@ import { applyOtsuBinarization, rotateImageData90cw } from './modules/image-proc
 // ── DOM references ──────────────────────────────────────────────
 const inputWidth    = document.getElementById('input-width');
 const inputHeight   = document.getElementById('input-height');
-const labelCounter  = document.getElementById('label-counter');
 
 function schedulePreviewUpdate() {
   clearTimeout(appState.previewTimer);
@@ -585,132 +585,6 @@ function applyZoom() {
   zoomSpacer.style.width = (stageW * zoom) + 'px';
   zoomSpacer.style.height = (stageH * zoom) + 'px';
   scaleWrap.style.transform = `scale(${zoom})`;
-}
-
-function renderTableHeader() {
-  const headRow = document.getElementById('entities-thead-row');
-  headRow.innerHTML = '';
-
-  for (let i = 0; i < appState.entityColumnCount; i += 1) {
-    const th = document.createElement('th');
-    const label = document.createElement('span');
-    label.textContent = `%E${i + 1}%`;
-
-    const deleteBtn = document.createElement('button');
-    deleteBtn.type = 'button';
-    deleteBtn.className = 'btn-delete-col';
-    deleteBtn.textContent = '✕';
-    deleteBtn.title = 'Delete column';
-    deleteBtn.setAttribute('aria-label', 'Delete column');
-    deleteBtn.dataset.colIndex = String(i);
-    deleteBtn.addEventListener('click', () => {
-      if (appState.entityColumnCount <= 1) {
-        showToast('At least one column must remain.', 'warning');
-        return;
-      }
-
-      const colIndex = Number.parseInt(deleteBtn.dataset.colIndex || '-1', 10);
-      if (colIndex < 0 || colIndex >= appState.entityColumnCount) return;
-
-      const tbody = document.getElementById('entities-tbody');
-      tbody.querySelectorAll('tr').forEach((tr) => {
-        const cellToRemove = tr.children[colIndex];
-        if (cellToRemove) {
-          cellToRemove.remove();
-        }
-      });
-
-      appState.entityColumnCount -= 1;
-      renderTableHeader();
-      updateCounter();
-      autoSaveTable();
-      schedulePreviewUpdate();
-    });
-
-    th.appendChild(label);
-    th.appendChild(deleteBtn);
-    headRow.appendChild(th);
-  }
-
-  const actionTh = document.createElement('th');
-  actionTh.style.width = '1%';
-  headRow.appendChild(actionTh);
-}
-
-/** Append a new entity row to the entities table. */
-function addEntityRow(entities = []) {
-  const tbody = document.getElementById('entities-tbody');
-  const tr = document.createElement('tr');
-
-  for (let i = 0; i < appState.entityColumnCount; i += 1) {
-    const td = document.createElement('td');
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'entity-input form-control form-control-sm';
-    input.value = entities[i] || '';
-    td.appendChild(input);
-    tr.appendChild(td);
-  }
-
-  const deleteCell = document.createElement('td');
-  deleteCell.className = 'text-center';
-  deleteCell.innerHTML = `
-    <button type="button" class="btn btn-danger btn-sm btn-delete-row" title="Delete row" aria-label="Delete row">
-      <i class="bi bi-trash"></i>
-    </button>
-  `;
-  tr.appendChild(deleteCell);
-  tbody.appendChild(tr);
-
-  tr.querySelector('.btn-delete-row').addEventListener('click', () => {
-    tr.remove();
-    updateCounter();
-    schedulePreviewUpdate();
-    autoSaveTable();
-  });
-
-  return tr;
-}
-
-/** Return array of non-empty entity rows. */
-function getRows() {
-  const tbody = document.getElementById('entities-tbody');
-  const rows = [];
-  tbody.querySelectorAll('tr').forEach((tr) => {
-    const inputs = tr.querySelectorAll('input.entity-input');
-    const entities = [];
-    for (let i = 0; i < appState.entityColumnCount; i += 1) {
-      entities.push((inputs[i]?.value || '').trim());
-    }
-    if (entities.some(entity => entity !== '')) {
-      rows.push({ entities });
-    }
-  });
-  return rows;
-}
-
-/** Persist all entity table rows to localStorage, including empty rows. */
-function autoSaveTable() {
-  const tbody = document.getElementById('entities-tbody');
-  const rows = [];
-  tbody.querySelectorAll('tr').forEach((tr) => {
-    const inputs = tr.querySelectorAll('input.entity-input');
-    const entities = [];
-    for (let i = 0; i < appState.entityColumnCount; i += 1) {
-      entities.push(inputs[i]?.value || '');
-    }
-    rows.push({ entities });
-  });
-  localStorage.setItem('lm_table', JSON.stringify({
-    columnCount: appState.entityColumnCount,
-    rows,
-  }));
-}
-
-/** Update the label count display. */
-function updateCounter() {
-  const n = getRows().length;
-  labelCounter.textContent = n === 1 ? '1 label loaded' : `${n} labels loaded`;
 }
 
 // ── Konva stage initialization ───────────────────────────────────
@@ -1878,86 +1752,7 @@ function handleDimensionChange() {
 
 // ── Event listeners ──────────────────────────────────────────────
 
-document.getElementById('entities-tbody').addEventListener('input', () => {
-  updateCounter();
-  schedulePreviewUpdate();
-  autoSaveTable();
-});
-
-document.getElementById('entities-tbody').addEventListener('paste', (e) => {
-  const target = e.target;
-  if (!target.classList.contains('entity-input')) return;
-
-  e.preventDefault();
-  const text = e.clipboardData.getData('text/plain');
-  const pasteRows = text.split(/\r?\n/).filter(r => r !== '');
-  if (pasteRows.length === 0) return;
-  const pasteData = pasteRows.map(r => r.split('\t'));
-
-  const tbody = document.getElementById('entities-tbody');
-  const allRows = Array.from(tbody.querySelectorAll('tr'));
-  const focusedRow = target.closest('tr');
-  const startRowIdx = allRows.indexOf(focusedRow);
-  if (startRowIdx < 0) return;
-
-  const rowInputs = Array.from(focusedRow.querySelectorAll('input.entity-input'));
-  const startColIdx = rowInputs.indexOf(target);
-  if (startColIdx < 0) return;
-
-  pasteData.forEach((cols, ri) => {
-    const rowIdx = startRowIdx + ri;
-    while (tbody.querySelectorAll('tr').length <= rowIdx) {
-      addEntityRow();
-    }
-
-    const tr = tbody.querySelectorAll('tr')[rowIdx];
-    const inputs = tr.querySelectorAll('input.entity-input');
-    cols.forEach((val, ci) => {
-      const colIdx = startColIdx + ci;
-      if (colIdx < inputs.length) {
-        inputs[colIdx].value = val;
-      }
-    });
-  });
-
-  updateCounter();
-  schedulePreviewUpdate();
-  autoSaveTable();
-});
-
-document.getElementById('btn-add-entity-row').addEventListener('click', () => {
-  addEntityRow();
-  updateCounter();
-  schedulePreviewUpdate();
-  autoSaveTable();
-});
-
-document.getElementById('btn-add-entity-col').addEventListener('click', () => {
-  appState.entityColumnCount += 1;
-  renderTableHeader();
-
-  const tbody = document.getElementById('entities-tbody');
-  tbody.querySelectorAll('tr').forEach((tr) => {
-    const td = document.createElement('td');
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'entity-input form-control form-control-sm';
-    td.appendChild(input);
-    tr.insertBefore(td, tr.lastElementChild);
-  });
-
-  schedulePreviewUpdate();
-  autoSaveTable();
-});
-
-document.getElementById('btn-clear-table').addEventListener('click', () => {
-  const tbody = document.getElementById('entities-tbody');
-  tbody.innerHTML = '';
-  addEntityRow();
-  updateCounter();
-  schedulePreviewUpdate();
-  localStorage.removeItem('lm_table');
-});
+// Entity table listeners are registered via initEntityTable() below.
 
 document.getElementById('btn-reset-template').addEventListener('click', () => {
   initStage(false);
@@ -2187,6 +1982,13 @@ document.getElementById('btn-save-preset').addEventListener('click', saveCurrent
 
 // ── Initialise ───────────────────────────────────────────────────
 
+// Wire entity-table module with the schedulePreviewUpdate callback.
+// Wrapped in try/catch so a missing DOM element does not abort the full init.
+try {
+  initEntityTable({ schedulePreviewUpdate });
+} catch (e) {
+  console.error('Failed to initialize entity table:', e);
+}
 try {
   const savedTableRaw = localStorage.getItem('lm_table');
   if (savedTableRaw) {
