@@ -213,8 +213,13 @@ export function getRows() {
   return rows;
 }
 
-/** Persist all entity table rows to localStorage, including empty rows. */
-export function autoSaveTable() {
+/**
+ * Read all entity table rows from the DOM and return them as a plain-object array.
+ * Includes empty rows; used by autoSaveTable and captureCurrentState.
+ *
+ * @returns {{ entities: string[] }[]}
+ */
+export function serializeTableRows() {
   const tbody = document.getElementById('entities-tbody');
   const rows = [];
   tbody.querySelectorAll('tr').forEach((tr) => {
@@ -225,9 +230,14 @@ export function autoSaveTable() {
     }
     rows.push({ entities });
   });
+  return rows;
+}
+
+/** Persist all entity table rows to localStorage, including empty rows. */
+export function autoSaveTable() {
   localStorage.setItem('lm_table', JSON.stringify({
     columnCount: appState.entityColumnCount,
-    rows,
+    rows: serializeTableRows(),
   }));
 }
 

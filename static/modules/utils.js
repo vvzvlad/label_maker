@@ -97,12 +97,20 @@ export function loadImageFromUrl(url) {
   });
 }
 
+// Maximum number of images kept in the URL image cache (oldest entry evicted first).
+const IMAGE_CACHE_MAX_SIZE = 100;
+
 export async function loadImageCached(url) {
   if (appState.imageCache.has(url)) {
     return appState.imageCache.get(url);
   }
   // Let the error from loadImageFromUrl propagate to the caller naturally.
   const img = await loadImageFromUrl(url);
+  // Evict the oldest entry when the cache reaches its size limit (Map preserves insertion order).
+  if (appState.imageCache.size >= IMAGE_CACHE_MAX_SIZE) {
+    const oldestKey = appState.imageCache.keys().next().value;
+    appState.imageCache.delete(oldestKey);
+  }
   appState.imageCache.set(url, img);
   return img;
 }
