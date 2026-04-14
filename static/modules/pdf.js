@@ -182,13 +182,24 @@ export async function generatePDF() {
   const stageW = appState.stage.width();
   const stageH = appState.stage.height();
 
-  for (let idx = 0; idx < rows.length; idx += 1) {
-    const row = rows[idx];
-    if (idx > 0) doc.addPage([pdfPageWidthMm, pdfPageHeightMm], orientation);
+  const btn = document.getElementById('btn-generate');
+  const originalHTML = btn.innerHTML;
+  btn.disabled = true;
 
-    let imgData = await renderOffscreenLabel(serializedNodes, row, stageW, stageH, PDF_DPI / 96);
-    if (rotatePdf) imgData = await rotateImageData90cw(imgData);
-    doc.addImage(imgData, 'PNG', 0, 0, pdfPageWidthMm, pdfPageHeightMm);
+  try {
+    for (let idx = 0; idx < rows.length; idx += 1) {
+      btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span> Generating ${idx + 1}/${rows.length}...`;
+
+      const row = rows[idx];
+      if (idx > 0) doc.addPage([pdfPageWidthMm, pdfPageHeightMm], orientation);
+
+      let imgData = await renderOffscreenLabel(serializedNodes, row, stageW, stageH, PDF_DPI / 96);
+      if (rotatePdf) imgData = await rotateImageData90cw(imgData);
+      doc.addImage(imgData, 'PNG', 0, 0, pdfPageWidthMm, pdfPageHeightMm);
+    }
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalHTML;
   }
 
   // Open PDF in viewer overlay instead of downloading
