@@ -25,11 +25,14 @@ export function generateQrDataUrl(text, size) {
   return canvas.toDataURL();
 }
 
-// Load a dataURL as an HTMLImageElement; calls onLoad(imgEl) when ready
-export function loadImage(dataUrl, onLoad) {
-  const img = new Image();
-  img.onload = () => onLoad(img);
-  img.src = dataUrl;
+// Load a dataURL as an HTMLImageElement; returns a Promise that resolves with the img element.
+export function loadImage(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload  = () => resolve(img);
+    img.onerror = () => reject(new Error('Failed to load image'));
+    img.src = dataUrl;
+  });
 }
 
 export function createUrlPlaceholderImage() {
@@ -117,6 +120,8 @@ export async function loadImageCached(url) {
 
 export function substituteEntityPlaceholders(value, row) {
   let result = value || '';
+  // Support both current format (row.entities array) and legacy format (row.entity1/2/3)
+  // for backwards compatibility with presets saved before the table format migration.
   const entities = Array.isArray(row?.entities)
     ? row.entities
     : [row?.entity1 || '', row?.entity2 || '', row?.entity3 || ''];

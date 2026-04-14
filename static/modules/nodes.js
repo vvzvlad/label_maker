@@ -357,31 +357,29 @@ export function attachQrNodeHandlers(qrNode) {
   qrNode.on('transformend', onTransformEnd);
 }
 
-export function addQrNode() {
+export async function addQrNode() {
   const defaultContent = '%E1%';
   const defaultSize = 80; // display size in px on canvas
   // Render at 512px for crispness; Konva.Image will scale it to defaultSize for display
   const dataUrl = generateQrDataUrl(defaultContent, 512);
 
-  loadImage(dataUrl, (imgEl) => {
-    const qrNode = new Konva.Image({
-      image: imgEl,
-      x: (appState.stage.width() - defaultSize) / 2,
-      y: (appState.stage.height() - defaultSize) / 2,
-      width: defaultSize,
-      height: defaultSize,
-      draggable: true,
-    });
-
-    qrNode._isQrNode = true;
-    qrNode._qrContent = defaultContent;
-    appState.layer.add(qrNode);
-    attachQrNodeHandlers(qrNode);
-
-    selectWithTransformer([qrNode], ['top-left', 'top-right', 'bottom-left', 'bottom-right']);
-    _schedulePreviewUpdate();
-    pushHistory();
+  const imgEl = await loadImage(dataUrl);
+  const qrNode = new Konva.Image({
+    image: imgEl,
+    x: (appState.stage.width() - defaultSize) / 2,
+    y: (appState.stage.height() - defaultSize) / 2,
+    width: defaultSize,
+    height: defaultSize,
+    draggable: true,
   });
+  qrNode._isQrNode = true;
+  qrNode._qrContent = defaultContent;
+  appState.layer.add(qrNode);
+  attachQrNodeHandlers(qrNode);
+
+  selectWithTransformer([qrNode], ['top-left', 'top-right', 'bottom-left', 'bottom-right']);
+  _schedulePreviewUpdate();
+  pushHistory();
 }
 
 export function addLineNode() {
@@ -498,7 +496,7 @@ export function restoreSavedNodes(nodes) {
       // Always render at high resolution; Konva.Image scales to qrWidth/qrHeight for display
       const dataUrl = generateQrDataUrl(qrContent, 512);
 
-      loadImage(dataUrl, (imgEl) => {
+      loadImage(dataUrl).then((imgEl) => {
         const qrNode = new Konva.Image({
           image:    imgEl,
           x:        n.x,

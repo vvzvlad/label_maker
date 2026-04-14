@@ -153,8 +153,7 @@ export async function renderOffscreenLabel(serializedNodes, row, stageW, stageH,
 
 /**
  * Generate a PDF with one label per page.
- * Placeholders matching %%ANYTHING%% in text nodes are replaced per label line.
- * The stage is exported as a PNG via stage.toDataURL() at 300 DPI equivalent.
+ * Placeholders matching %E1%, %E2%, ... in text/QR nodes are substituted per row via renderOffscreenLabel.
  */
 export async function generatePDF() {
   const rows = getRows();
@@ -163,10 +162,8 @@ export async function generatePDF() {
     return;
   }
 
-  const inputWidth  = document.getElementById('input-width');
-  const inputHeight = document.getElementById('input-height');
-  const widthMm  = parseFloat(inputWidth.value)  || 58;
-  const heightMm = parseFloat(inputHeight.value) || 40;
+  const widthMm  = parseFloat(document.getElementById('input-width').value)  || 58;
+  const heightMm = parseFloat(document.getElementById('input-height').value) || 40;
   const rotatePdf = document.getElementById('input-rotate-90').checked;
   // For rotated export: page dimensions are swapped (label is placed rotated)
   const pdfPageWidthMm  = rotatePdf ? heightMm : widthMm;
@@ -181,75 +178,18 @@ export async function generatePDF() {
     format: [pdfPageWidthMm, pdfPageHeightMm],
   });
 
-  // Collect all text nodes (skip background rect and transformer)
-  const textNodes = appState.layer.getChildren().filter(n => n.getClassName() === 'Text');
-  const qrNodes = appState.layer.getChildren().filter(n => n._isQrNode === true);
-  const urlImageNodes = appState.layer.getChildren().filter(n => n._isUrlNode === true);
-
-  // Remember original texts for restoration after each export
-  const originalTexts = textNodes.map(n => n.text());
-  const originalQrImages = qrNodes.map(n => n.image());
-  const originalUrlImages = urlImageNodes.map(n => n.image());
-
-  // Detach transformer so it doesn't appear in exported image
-  const prevSelected = appState.transformer.nodes().slice();
-  appState.transformer.nodes([]);
+  const serializedNodes = serializeLayerNodes();
+  const stageW = appState.stage.width();
+  const stageH = appState.stage.height();
 
   for (let idx = 0; idx < rows.length; idx += 1) {
     const row = rows[idx];
     if (idx > 0) doc.addPage([pdfPageWidthMm, pdfPageHeightMm], orientation);
 
-    // Substitute ENTITY placeholders; convert literal \n sequences to real newlines
-    textNodes.forEach((node, ni) => {
-      node.text(substituteEntityPlaceholders(originalTexts[ni], row));
-    });
-
-    // Substitute placeholders in QR content and regenerate QR image synchronously
-    qrNodes.forEach((node) => {
-      const content = substituteEntityPlaceholders(node._qrContent || '', row);
-
-      // Render QR at high resolution so it stays sharp in high-DPI PDF export
-      const qrCanvas = document.createElement('canvas');
-      new QRious({ element: qrCanvas, value: content || ' ', size: 512 });
-      node.image(qrCanvas);
-    });
-
-    await Promise.all(urlImageNodes.map(async (node) => {
-      const resolvedUrl = substituteEntityPlaceholders(node._srcTemplate || '', row);
-      let imageForRow = createUrlPlaceholderImage();
-      if (resolvedUrl) {
-        try {
-          imageForRow = await loadImageCached(resolvedUrl);
-        } catch {
-          imageForRow = createUrlPlaceholderImage();
-        }
-      }
-      if (imageForRow instanceof HTMLImageElement) {
-        node.image(fitImageToCanvas(imageForRow, node.width(), node.height()));
-      } else {
-        node.image(imageForRow);
-      }
-    }));
-
-    appState.layer.batchDraw();
-
-    // Export stage as PNG at PDF_DPI resolution
-    let imgData = await applyOtsuBinarization(appState.stage.toDataURL({ pixelRatio: PDF_DPI / 96 }));
-    // If rotation is requested, rotate the exported image 90 degrees clockwise
-    if (rotatePdf) {
-      imgData = await rotateImageData90cw(imgData);
-    }
+    let imgData = await renderOffscreenLabel(serializedNodes, row, stageW, stageH, PDF_DPI / 96);
+    if (rotatePdf) imgData = await rotateImageData90cw(imgData);
     doc.addImage(imgData, 'PNG', 0, 0, pdfPageWidthMm, pdfPageHeightMm);
-
-    // Restore original texts
-    textNodes.forEach((node, ni) => node.text(originalTexts[ni]));
-    qrNodes.forEach((node, ni) => node.image(originalQrImages[ni]));
-    urlImageNodes.forEach((node, ni) => node.image(originalUrlImages[ni]));
   }
-
-  // Restore transformer selection
-  appState.transformer.nodes(prevSelected);
-  appState.layer.batchDraw();
 
   // Open PDF in viewer overlay instead of downloading
   const pdfBlobUrl = doc.output('bloburl');
