@@ -2,7 +2,6 @@ import { appState, PDF_DPI, PREVIEW_PIXEL_RATIO } from './state.js';
 import { applyOtsuBinarization, rotateImageData90cw } from './image-processing.js';
 import {
   substituteEntityPlaceholders,
-  createUrlPlaceholderImage,
   fitImageToCanvas,
   loadImageCached,
   showToast,
@@ -90,13 +89,22 @@ export async function renderOffscreenLabel(serializedNodes, row, stageW, stageH,
         offLayer.add(qrNode);
       } else if (n.type === 'image' && n.isUrl === true) {
         const resolvedUrl = substituteEntityPlaceholders(n.urlTemplate || '', row);
-        let imageForRow = createUrlPlaceholderImage();
+        let imageForRow = null;
         if (resolvedUrl) {
           try {
             imageForRow = await loadImageCached(resolvedUrl);
           } catch {
-            imageForRow = createUrlPlaceholderImage();
+            imageForRow = null;
           }
+        }
+        // When URL is missing or fails, render a blank white canvas (no placeholder text in output)
+        if (!imageForRow) {
+          const blank = document.createElement('canvas');
+          blank.width  = Math.max(1, Math.round(n.width));
+          blank.height = Math.max(1, Math.round(n.height));
+          blank.getContext('2d').fillStyle = '#ffffff';
+          blank.getContext('2d').fillRect(0, 0, blank.width, blank.height);
+          imageForRow = blank;
         }
         const imageNode = new Konva.Image({
           image: imageForRow instanceof HTMLImageElement
