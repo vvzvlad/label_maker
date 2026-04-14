@@ -171,6 +171,23 @@ export function autoSaveTemplate() {
 }
 
 /**
+ * Apply a template descriptor to the canvas: restore dimensions, zoom, nodes.
+ * Does not call schedulePreviewUpdate or pushHistory — the caller is responsible.
+ */
+export function applyTemplateState(tpl) {
+  if (tpl.widthMm != null) document.getElementById('input-width').value = tpl.widthMm;
+  if (tpl.heightMm != null) document.getElementById('input-height').value = tpl.heightMm;
+  if (tpl.zoom != null) {
+    document.getElementById('input-zoom').value = tpl.zoom;
+    document.getElementById('zoom-label').textContent = tpl.zoom + '%';
+  }
+  _initStage(false);
+  if (Array.isArray(tpl.nodes)) _restoreSavedNodes(tpl.nodes);
+  if (appState.transformer) appState.transformer.nodes([]);
+  if (appState.layer) appState.layer.batchDraw();
+}
+
+/**
  * Load a template from the given file input and restore canvas + settings.
  * Uses injected callbacks set by initTemplate().
  *
