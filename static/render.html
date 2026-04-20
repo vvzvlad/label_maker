@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <script src="https://cdn.jsdelivr.net/npm/konva@9/konva.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body>
+<script type="module">
+import { substituteEntityPlaceholders, fitImageToCanvas, loadImageCached } from './modules/utils.js';
+import { applyOtsuBinarization, rotateImageData90cw } from './modules/image-processing.js';
+
+const PX_PER_MM = 96 / 25.4;
+const PDF_DPI = 600;
+
+async function renderOffscreenLabel(serializedNodes, row, stageW, stageH, pixelRatio) {
+  const container = document.createElement('div');
+  container.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;overflow:hidden;opacity:0;pointer-events:none;';
+  document.body.appendChild(container);
+
+  let offStage = null;
+  try {
+    offStage = new Konva.Stage({ container, width: stageW, height: stageH });
+    const offLayer = new Konva.Layer();
+    offStage.add(offLayer);
+
+    offLayer.add(new Konva.Rect({
+      x: 0, y: 0, width: stageW, height: stageH, fill: '#ffffff', listening: false,
+    }));
+
+    for (const n of serializedNodes) {
+      if (n.type === 'text') {
+        offLayer.add(new Konva.Text({
+          text: substituteEntityPlaceholders(n.text, row),
+          x: n.x, y: n.y,
+          rotation: n.rotation || 0,
+          scaleX: n.scaleX !== undefined ? n.scaleX : 1,
+          scaleY: n.scaleY !== undefined ? n.scaleY : 1,
+          fontSize: n.fontSize,
+          fill: n.fill,
+          width: n.width,
+          align: n.align || 'left',
+          verticalAlign: n.verticalAlign || 'top',
+          height: n.height !== undefined ? n.height : n.fontSize,
+          wrap: 'word',
+        }));
+      } else if (n.type === 'qr') {
+        const content = substituteEntityPlaceholders(n.content || '', row);
+        const qrCanvas = document.createElement('canvas');
+        new QRious({ element: qrCanvas, value: content || ' ', size: 256 });
+        offLayer.add(new Konva.Image({
+          image: qrCanvas,
+          x: n.x, y: n.y,
+          rotation: n.rotation || 0,
+          scaleX: n.scaleX !== undefined ? n.scaleX : 1,
+          scaleY: n.scaleY !== undefined ? n.scaleY : 1,
+          width: n.width, height: n.height,
+        }));
+      } else if (n.type === 'image' && n.isUrl === true) {
+        const resolvedUrl = substituteEntityPlaceholders(n.urlTemplate || '', row);
+        let img = null;
+        if (resolvedUrl) {
+          try { img = await loadImageCached(resolvedUrl); } catch { img = null; }
+        }
+        if (!img) {
+          const blank = document.createElement('canvas');
+          blank.width = Math.max(1, Math.round(n.width));
+          blank.height = Math.max(1, Math.round(n.height));
+          blank.getContext('2d').fillStyle = '#ffffff';
+          blank.getContext('2d').fillRect(0, 0, blank.width, blank.height);
+          img = blank;
+        }
+        offLayer.add(new Konva.Image({
+          image: img instanceof HTMLImageElement ? fitImageToCanvas(img, n.width, n.height) : img,
+          x: n.x, y: n.y,
+          rotation: n.rotation || 0,
+          scaleX: n.scaleX !== undefined ? n.scaleX : 1,
+          scaleY: n.scaleY !== undefined ? n.scaleY : 1,
+          width: n.width, height: n.height,
+        }));
+      } else if (n.type === 'image' && n.src) {
+        const imgEl = await loadImageCached(n.src);
+        offLayer.add(new Konva.Image({
+          image: imgEl,
+          x: n.x, y: n.y,
+          rotation: n.rotation || 0,
+          scaleX: n.scaleX !== undefined ? n.scaleX : 1,
+          scaleY: n.scaleY !== undefined ? n.scaleY : 1,
+          width: n.width, height: n.height,
+        }));
+      } else if (n.type === 'line') {
+        offLayer.add(new Konva.Line({
+          points: n.points,
+          x: n.x || 0, y: n.y || 0,
+          rotation: n.rotation || 0,
+          scaleX: n.scaleX !== undefined ? n.scaleX : 1,
+          scaleY: n.scaleY !== undefined ? n.scaleY : 1,
+          stroke: n.stroke || '#000000',
+          strokeWidth: n.strokeWidth || 2,
+          lineCap: 'square',
+        }));
+      }
+    }
+
+    offLayer.batchDraw();
+    const rawDataUrl = offStage.toDataURL({ pixelRatio });
+    return await applyOtsuBinarization(rawDataUrl);
+  } finally {
+    if (offStage) offStage.destroy();
+    container.remove();
+  }
+}
+
+window.renderPdf = async function(template, rows, rotatePdf) {
+  const widthMm  = template.widthMm  || 58;
+  const heightMm = template.heightMm || 40;
+  const stageW = Math.round(widthMm  * PX_PER_MM);
+  const stageH = Math.round(heightMm * PX_PER_MM);
+  const nodes = template.nodes || [];
+
+  const pdfPageWidthMm  = rotatePdf ? heightMm : widthMm;
+  const pdfPageHeightMm = rotatePdf ? widthMm  : heightMm;
+  const orientation = pdfPageWidthMm > pdfPageHeightMm ? 'landscape' : 'portrait';
+
+  const doc = new window.jspdf.jsPDF({
+    orientation,
+    unit: 'mm',
+    format: [pdfPageWidthMm, pdfPageHeightMm],
+  });
+
+  for (let idx = 0; idx < rows.length; idx++) {
+    if (idx > 0) doc.addPage([pdfPageWidthMm, pdfPageHeightMm], orientation);
+    let imgData = await renderOffscreenLabel(nodes, rows[idx], stageW, stageH, PDF_DPI / 96);
+    if (rotatePdf) imgData = await rotateImageData90cw(imgData);
+    doc.addImage(imgData, 'PNG', 0, 0, pdfPageWidthMm, pdfPageHeightMm);
+  }
+
+  return doc.output('datauristring');
+};
+
+window.__rendererReady = true;
+</script>
+</body>
+</html>
