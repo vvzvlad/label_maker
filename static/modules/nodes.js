@@ -8,6 +8,7 @@ import {
   fitImageToCanvas,
   buildUrlNodePreviewImage,
   loadImageCached,
+  fitTextFontSize,
 } from './utils.js';
 
 // Warn if a node function is called before initNodes() wires the real implementation.
@@ -34,7 +35,7 @@ export function onTransformEnd() {
 /**
  * Create and register a Konva.Text node with interaction handlers.
  */
-export function addTextNodeWithProps(text, x, y, fontSize, fill, width = 200, align = 'left', verticalAlign = 'top', textHeight = undefined) {
+export function addTextNodeWithProps(text, x, y, fontSize, fill, width = 200, align = 'left', verticalAlign = 'top', textHeight = undefined, autoFontSize = false) {
   const textNode = new Konva.Text({
     text:      text,
     x:         x,
@@ -47,10 +48,12 @@ export function addTextNodeWithProps(text, x, y, fontSize, fill, width = 200, al
     // Default height equals font size so the area exactly fits one line of text
     height:    textHeight !== undefined ? textHeight : fontSize,
     wrap:      'word',
+    autoFontSize: !!autoFontSize, // custom attr: drives auto-fit on edit/resize/render
     draggable: true,
   });
 
   appState.layer.add(textNode);
+  applyAutoFontSize(textNode);
 
   // Single click → select (attach transformer)
   textNode.on('click tap', (e) => {
@@ -85,12 +88,34 @@ export function addTextNodeWithProps(text, x, y, fontSize, fill, width = 200, al
     textNode.scaleX(1);
     textNode.height(Math.max(4, textNode.height() * textNode.scaleY()));
     textNode.scaleY(1);
+    applyAutoFontSize(textNode);
     appState.layer.batchDraw();
   });
   textNode.on('transformend', onTransformEnd);
 
   appState.layer.batchDraw();
   return textNode;
+}
+
+/**
+ * If the given text node has auto font sizing enabled, recompute and apply the
+ * largest font size that fits its current text inside its width × height zone.
+ * No-op for non-text nodes or nodes without the flag.
+ */
+export function applyAutoFontSize(textNode) {
+  if (!textNode || typeof textNode.getClassName !== 'function' || textNode.getClassName() !== 'Text') return;
+  if (!textNode.getAttr('autoFontSize')) return;
+  if (!textNode.text() || !textNode.text().trim()) return; // keep current size for blank text
+  const best = fitTextFontSize({
+    text: textNode.text(),
+    width: textNode.width(),
+    height: textNode.height(),
+    fontFamily: textNode.fontFamily(),
+    fontStyle: textNode.fontStyle(),
+    lineHeight: textNode.lineHeight(),
+    letterSpacing: textNode.letterSpacing(),
+  });
+  textNode.fontSize(best);
 }
 
 // ── In-place text editing ────────────────────────────────────────
@@ -149,6 +174,7 @@ export function startTextEdit(textNode) {
 
     const newText = textarea.value.trim() !== '' ? textarea.value : textNode.text();
     textNode.text(newText);
+    applyAutoFontSize(textNode);
     textNode.show();
     selectWithTransformer([textNode], ['middle-left', 'middle-right', 'top-center', 'bottom-center']);
     _schedulePreviewUpdate();
@@ -459,7 +485,7 @@ export function restoreUrlImageNode(n) {
 export function restoreSavedNodes(nodes) {
   nodes.forEach(n => {
     if (n.type === 'text') {
-      const node = addTextNodeWithProps(n.text, n.x, n.y, n.fontSize, n.fill, n.width, n.align || 'left', n.verticalAlign || 'top', n.height);
+      const node = addTextNodeWithProps(n.text, n.x, n.y, n.fontSize, n.fill, n.width, n.align || 'left', n.verticalAlign || 'top', n.height, n.autoFontSize);
       // Restore transform attributes that Transformer may have applied
       if (n.rotation) node.rotation(n.rotation);
       if (n.scaleX   !== undefined) node.scaleX(n.scaleX);

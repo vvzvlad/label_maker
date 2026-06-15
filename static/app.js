@@ -12,7 +12,7 @@ import { initPdf, generatePDF, closePdfModal, renderPreviewStrip } from './modul
 import { initPresets, openPresetsModal } from './modules/presets.js';
 import {
   initNodes,
-  addTextNodeWithProps, addTextNode,
+  addTextNodeWithProps, addTextNode, applyAutoFontSize,
   attachImageNodeHandlers, addImageNodeFromUrl, addImageNode,
   attachQrNodeHandlers, addQrNode,
   addLineNode, attachLineNodeHandlers,
@@ -83,7 +83,7 @@ try {
 
 // Wire context menu module with node handler callbacks.
 try {
-  initContextMenu({ addTextNodeWithProps, attachLineNodeHandlers, attachQrNodeHandlers, attachImageNodeHandlers, closePdfModal, schedulePreviewUpdate });
+  initContextMenu({ addTextNodeWithProps, applyAutoFontSize, attachLineNodeHandlers, attachQrNodeHandlers, attachImageNodeHandlers, closePdfModal, schedulePreviewUpdate });
 } catch (e) {
   console.error('Failed to initialize context menu module:', e);
 }

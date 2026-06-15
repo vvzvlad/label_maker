@@ -132,6 +132,61 @@ export function substituteEntityPlaceholders(value, row) {
   return result;
 }
 
+/* global Konva */
+
+/**
+ * Compute the largest integer font size at which `text`, wrapped by word inside a
+ * box of the given width/height, still fits within both the width and the height of
+ * that box. Powers the "auto font size" feature. Returns minFontSize when even the
+ * smallest size overflows (text is allowed to overflow only in that degenerate case).
+ *
+ * @param {Object}  opts
+ * @param {string}  opts.text            placeholder-substituted text content
+ * @param {number}  opts.width           zone width in px
+ * @param {number}  opts.height          zone height in px
+ * @param {string}  [opts.fontFamily]    must match the rendered node for accurate measuring
+ * @param {string}  [opts.fontStyle]
+ * @param {number}  [opts.lineHeight]
+ * @param {number}  [opts.letterSpacing]
+ * @param {number}  [opts.minFontSize=4]
+ * @returns {number} best integer font size
+ */
+export function fitTextFontSize(opts) {
+  const { text, width, height, fontFamily, fontStyle, lineHeight, letterSpacing, minFontSize = 4 } = opts || {};
+  const min = Math.max(1, Math.floor(minFontSize));
+  // A single line is `fontSize` tall (lineHeight defaults to 1), so the font can
+  // never exceed the zone height — that is the natural search upper bound.
+  const max = Math.max(min, Math.floor(height || 0));
+  if (!text || !(width > 0) || !(height > 0)) return min;
+
+  // One reusable detached probe. height:'auto' makes height() return content height.
+  const probe = new Konva.Text({
+    text,
+    width,
+    height: 'auto',
+    wrap: 'word',
+    align: 'left',
+    fontFamily: fontFamily || undefined,
+    fontStyle: fontStyle || undefined,
+    lineHeight: lineHeight || undefined,
+    letterSpacing: letterSpacing || undefined,
+  });
+
+  const fits = (fs) => {
+    probe.fontSize(fs); // fontSizeChange auto-recomputes the text geometry
+    return probe.height() <= height && probe.getTextWidth() <= width;
+  };
+
+  let lo = min, hi = max, best = min;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (fits(mid)) { best = mid; lo = mid + 1; }
+    else { hi = mid - 1; }
+  }
+  probe.destroy();
+  return best;
+}
+
 export async function buildUrlNodePreviewImage(urlTemplate) {
   const hasPlaceholders = /%E\d+%/.test(urlTemplate || '');
   if (!urlTemplate || hasPlaceholders) {

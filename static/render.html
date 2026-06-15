@@ -8,7 +8,7 @@
 </head>
 <body>
 <script type="module">
-import { substituteEntityPlaceholders, fitImageToCanvas, loadImageCached } from './modules/utils.js';
+import { substituteEntityPlaceholders, fitImageToCanvas, loadImageCached, fitTextFontSize } from './modules/utils.js';
 import { applyOtsuBinarization, rotateImageData90cw } from './modules/image-processing.js';
 
 const PX_PER_MM = 96 / 25.4;
@@ -31,18 +31,25 @@ async function renderOffscreenLabel(serializedNodes, row, stageW, stageH, pixelR
 
     for (const n of serializedNodes) {
       if (n.type === 'text') {
+        const renderedText = substituteEntityPlaceholders(n.text, row);
+        const boxHeight = n.height !== undefined ? n.height : n.fontSize;
+        let fontSize = n.fontSize;
+        if (n.autoFontSize) {
+          // Recompute per row: each label has different text, so the best size differs.
+          fontSize = fitTextFontSize({ text: renderedText, width: n.width, height: boxHeight });
+        }
         offLayer.add(new Konva.Text({
-          text: substituteEntityPlaceholders(n.text, row),
+          text: renderedText,
           x: n.x, y: n.y,
           rotation: n.rotation || 0,
           scaleX: n.scaleX !== undefined ? n.scaleX : 1,
           scaleY: n.scaleY !== undefined ? n.scaleY : 1,
-          fontSize: n.fontSize,
+          fontSize: fontSize,
           fill: n.fill,
           width: n.width,
           align: n.align || 'left',
           verticalAlign: n.verticalAlign || 'top',
-          height: n.height !== undefined ? n.height : n.fontSize,
+          height: boxHeight,
           wrap: 'word',
         }));
       } else if (n.type === 'qr') {

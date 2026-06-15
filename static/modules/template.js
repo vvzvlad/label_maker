@@ -54,6 +54,7 @@ export function serializeLayerNodes() {
         height:   node.height(),
         align:    node.align(),
         verticalAlign: node.verticalAlign(),
+        autoFontSize: !!node.getAttr('autoFontSize'),
       });
     } else if (cls === 'Image') {
       if (node._isQrNode) {

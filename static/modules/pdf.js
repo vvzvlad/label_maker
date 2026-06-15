@@ -5,6 +5,7 @@ import {
   fitImageToCanvas,
   loadImageCached,
   showToast,
+  fitTextFontSize,
 } from './utils.js';
 import { serializeLayerNodes, autoSaveTemplate } from './template.js';
 import { getRows } from './entity-table.js';
@@ -55,20 +56,27 @@ export async function renderOffscreenLabel(serializedNodes, row, stageW, stageH,
 
     for (const n of serializedNodes) {
       if (n.type === 'text') {
+        const renderedText = substituteEntityPlaceholders(n.text, row);
+        const boxHeight = n.height !== undefined ? n.height : n.fontSize;
+        let fontSize = n.fontSize;
+        if (n.autoFontSize) {
+          // Recompute per row: each label has different text, so the best size differs.
+          fontSize = fitTextFontSize({ text: renderedText, width: n.width, height: boxHeight });
+        }
         const textNode = new Konva.Text({
-          text: substituteEntityPlaceholders(n.text, row),
+          text: renderedText,
           x: n.x,
           y: n.y,
           rotation: n.rotation || 0,
           scaleX: n.scaleX !== undefined ? n.scaleX : 1,
           scaleY: n.scaleY !== undefined ? n.scaleY : 1,
-          fontSize: n.fontSize,
+          fontSize: fontSize,
           fill: n.fill,
           width: n.width,
           align: n.align || 'left',
           verticalAlign: n.verticalAlign || 'top',
           // Default height equals font size (matches the creation-time default)
-          height: n.height !== undefined ? n.height : n.fontSize,
+          height: boxHeight,
           wrap: 'word',
         });
         offLayer.add(textNode);

@@ -196,7 +196,7 @@
     <div id="ctx-sizes-row" style="padding:6px 14px 8px; display:flex; gap:8px; align-items:flex-end;">
       <div>
         <div style="color:#bbb; font-size:0.75rem; user-select:none; margin-bottom:4px;">Font size (px)</div>
-        <input id="ctx-fontsize" type="number" min="4" max="200" step="1"
+        <input id="ctx-fontsize" type="number" min="4" max="2000" step="1"
           class="form-control form-control-sm"
           style="background:#252525; border-color:#333; color:#e0e0e0; width:80px;"
         />
@@ -207,6 +207,15 @@
           class="form-control form-control-sm"
           style="background:#252525; border-color:#333; color:#e0e0e0; width:80px;"
         />
+      </div>
+    </div>
+    <!-- Auto font size toggle (text nodes only) -->
+    <div id="ctx-autofont-row" style="padding:0 14px 8px; display:flex; align-items:center;">
+      <div class="form-check mb-0">
+        <input class="form-check-input" type="checkbox" id="ctx-autofont" style="cursor:pointer;" />
+        <label class="form-check-label" for="ctx-autofont" style="font-size:0.75rem; color:#bbb; cursor:pointer; user-select:none;">
+          Auto font size (fit to area)
+        </label>
       </div>
     </div>
     <!-- Horizontal align + Vertical align on one row -->

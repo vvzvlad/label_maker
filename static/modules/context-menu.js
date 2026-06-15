@@ -4,6 +4,7 @@ import { pushHistory, undoHistory, redoHistory, selectWithTransformer } from './
 // ── DI callbacks ─────────────────────────────────────────────────
 
 let _addTextNodeWithProps = () => {};
+let _applyAutoFontSize = () => {};
 let _attachLineNodeHandlers = () => {};
 let _attachQrNodeHandlers = () => {};
 let _attachImageNodeHandlers = () => {};
@@ -12,8 +13,9 @@ let _schedulePreviewUpdate = () => {};
 // Guard to prevent duplicate event listener registration if initContextMenu is called more than once.
 let _listenersRegistered = false;
 
-export function initContextMenu({ addTextNodeWithProps, attachLineNodeHandlers, attachQrNodeHandlers, attachImageNodeHandlers, closePdfModal, schedulePreviewUpdate }) {
+export function initContextMenu({ addTextNodeWithProps, applyAutoFontSize, attachLineNodeHandlers, attachQrNodeHandlers, attachImageNodeHandlers, closePdfModal, schedulePreviewUpdate }) {
   _addTextNodeWithProps = addTextNodeWithProps;
+  _applyAutoFontSize = applyAutoFontSize;
   _attachLineNodeHandlers = attachLineNodeHandlers;
   _attachQrNodeHandlers = attachQrNodeHandlers;
   _attachImageNodeHandlers = attachImageNodeHandlers;
@@ -32,6 +34,8 @@ const ctxSizesRow     = document.getElementById('ctx-sizes-row');
 const ctxAlignsRow    = document.getElementById('ctx-aligns-row');
 const ctxFontInput    = document.getElementById('ctx-fontsize');
 const ctxTextHeightInput = document.getElementById('ctx-textheight');
+const ctxAutoFont     = document.getElementById('ctx-autofont');
+const ctxAutofontRow  = document.getElementById('ctx-autofont-row');
 const ctxStrokeInput  = document.getElementById('ctx-strokewidth');
 const ctxAlignLine    = document.getElementById('ctx-align-line');
 const ctxAlignLeft    = document.getElementById('ctx-align-left');
@@ -96,6 +100,8 @@ export function showContextMenu(x, y, node) {
   ctxSizesRow.style.display = (!isMulti && isText) ? 'flex' : 'none';
   // Show alignment row (flex layout) for text nodes
   ctxAlignsRow.style.display = (!isMulti && isText) ? 'flex' : 'none';
+  // Show auto font size toggle row for text nodes
+  ctxAutofontRow.style.display = (!isMulti && isText) ? 'flex' : 'none';
   ctxMenu.querySelectorAll('[data-stroke-row]').forEach(el => {
     el.style.display = (!isMulti && isLine) ? '' : 'none';
   });
@@ -104,9 +110,13 @@ export function showContextMenu(x, y, node) {
   if (isText) {
     setAlignButtonsActive(node.align() || 'left');
     setVerticalAlignButtonsActive(node.verticalAlign() || 'top');
+    const autoOn = !!node.getAttr('autoFontSize');
+    ctxAutoFont.checked = autoOn;
+    ctxFontInput.disabled = autoOn; // font size is computed while auto is on
   } else {
     setAlignButtonsActive('left');
     setVerticalAlignButtonsActive('top');
+    ctxFontInput.disabled = false;
   }
 }
 
@@ -206,6 +216,7 @@ function _registerEventListeners() {
           node.align(),
           node.verticalAlign(),
           node.height(),
+          node.getAttr('autoFontSize'),
         );
         textNode.rotation(node.rotation() || 0);
         textNode.scaleX(node.scaleX() !== undefined ? node.scaleX() : 1);
@@ -315,7 +326,7 @@ function _registerEventListeners() {
 
   // Font size change — apply live on input
   ctxFontInput.addEventListener('input', () => {
-    if (ctxTarget && ctxTarget.getClassName() === 'Text') {
+    if (ctxTarget && ctxTarget.getClassName() === 'Text' && !ctxTarget.getAttr('autoFontSize')) {
       const fs = parseInt(ctxFontInput.value, 10);
       if (fs > 0) {
         ctxTarget.fontSize(fs);
@@ -328,11 +339,30 @@ function _registerEventListeners() {
     pushHistory();
   });
 
+  // Auto font size toggle — enable/disable per-node automatic fitting
+  ctxAutoFont.addEventListener('change', () => {
+    if (!ctxTarget || ctxTarget.getClassName() !== 'Text') return;
+    const enabled = ctxAutoFont.checked;
+    ctxTarget.setAttr('autoFontSize', enabled);
+    ctxFontInput.disabled = enabled;
+    if (enabled) {
+      _applyAutoFontSize(ctxTarget);
+    }
+    ctxFontInput.value = ctxTarget.fontSize(); // reflect the (possibly recomputed) size
+    appState.layer.batchDraw();
+    _schedulePreviewUpdate();
+    pushHistory();
+  });
+
   ctxTextHeightInput.addEventListener('input', () => {
     if (ctxTarget && ctxTarget.getClassName() === 'Text') {
       const h = parseInt(ctxTextHeightInput.value, 10);
       if (h > 0) {
         ctxTarget.height(h);
+        if (ctxTarget.getAttr('autoFontSize')) {
+          _applyAutoFontSize(ctxTarget);
+          ctxFontInput.value = ctxTarget.fontSize();
+        }
         appState.layer.batchDraw();
       }
     }
