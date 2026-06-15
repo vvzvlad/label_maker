@@ -66,26 +66,38 @@ if PDF_API_ENABLED:
 
         page = await _browser.new_page()
 
-        # Diagnostics: external template images are fetched by the renderer process itself,
-        # so a blank label means those requests failed (no egress/DNS) or were blocked (CORS).
-        # The 200/Content-Type a curl sees does NOT prove the browser could load them.
-        def _on_requestfailed(request):
-            logger.warning("PDF render: request FAILED %s %s :: %s",
-                           request.method, request.url, request.failure)
+        # The renderer loads template images with crossOrigin='anonymous' (required so the
+        # Konva canvas stays untainted for toDataURL). Third-party hosts that omit an
+        # Access-Control-Allow-Origin header therefore fail to load in headless Chrome and the
+        # label renders blank. Proxy image requests through Playwright's network stack (not
+        # subject to browser CORS) and re-serve them with a permissive ACAO header so the
+        # crossOrigin load succeeds without tainting the canvas. No client-side change needed.
+        async def _proxy_images(route):
+            request = route.request
+            if request.resource_type != "image":
+                await route.continue_()
+                return
+            try:
+                resp = await route.fetch()
+                body = await resp.body()
+                await route.fulfill(
+                    status=resp.status,
+                    body=body,
+                    headers={
+                        "content-type": resp.headers.get("content-type", "application/octet-stream"),
+                        "access-control-allow-origin": "*",
+                        "cache-control": resp.headers.get("cache-control", "no-store"),
+                    },
+                )
+            except Exception as exc:
+                logger.warning("PDF render: image proxy failed for %s :: %s", request.url, exc)
+                await route.continue_()
 
-        def _on_response(response):
-            if response.request.resource_type == "image":
-                logger.info("PDF render: image response %s %s %s",
-                            response.status, response.headers.get("content-type", "?"), response.url)
+        await page.route("**/*", _proxy_images)
 
-        def _on_console(msg):
-            # CORS rejections of crossOrigin='anonymous' images surface here, not in requestfailed.
-            if msg.type in ("error", "warning"):
-                logger.warning("PDF render: console [%s] %s", msg.type, msg.text)
-
-        page.on("requestfailed", _on_requestfailed)
-        page.on("response", _on_response)
-        page.on("console", _on_console)
+        # Keep lightweight diagnostics: these only fire when something actually goes wrong.
+        page.on("requestfailed", lambda r: logger.warning(
+            "PDF render: request FAILED %s %s :: %s", r.method, r.url, r.failure))
         page.on("pageerror", lambda exc: logger.warning("PDF render: pageerror %s", exc))
 
         try:
