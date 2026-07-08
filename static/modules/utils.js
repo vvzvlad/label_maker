@@ -135,11 +135,13 @@ export function substituteEntityPlaceholders(value, row) {
 /* global Konva */
 
 /**
- * Compute the largest integer font size at which each of `text`'s natural
- * ("\n"-delimited) lines fits the box width and the total height fits the box height.
- * No word-wrapping is performed: a long single word shrinks to fit on one line instead
- * of being broken across lines. Powers the "auto font size" feature. Returns minFontSize
- * when even the smallest size overflows (text is allowed to overflow only in that case).
+ * Compute the largest integer font size at which `text`, word-wrapped inside a box of the
+ * given width, still fits: the wrapped content height must fit the box height, and the widest
+ * single word must fit the box width so no word is broken mid-character (the only exception is
+ * a single word wider than the zone even at the minimum size, which Konva still breaks). Multi-word
+ * text wraps onto several lines to fill the zone; a long single word shrinks to fit on one line.
+ * Powers the "auto font size" feature. Returns minFontSize when even the smallest size
+ * overflows (text is allowed to overflow only in that degenerate case).
  *
  * @param {Object}  opts
  * @param {string}  opts.text            placeholder-substituted text content
@@ -150,7 +152,7 @@ export function substituteEntityPlaceholders(value, row) {
  * @param {number}  [opts.lineHeight]
  * @param {number}  [opts.letterSpacing]
  * @param {number}  [opts.minFontSize=4]
- * @param {number}  [opts.maxFontSize=25]  hard upper cap on the resulting font size (px)
+ * @param {number}  [opts.maxFontSize]     upper cap (px) on the result; defaults to AUTO_FONT_SIZE_MAX. `min` still takes priority if it is larger.
  * @returns {number} best integer font size
  */
 export function fitTextFontSize(opts) {
@@ -161,25 +163,32 @@ export function fitTextFontSize(opts) {
   const max = Math.max(min, Math.min(Math.floor(height || 0), Math.floor(maxFontSize)));
   if (!text || !(width > 0) || !(height > 0)) return min;
 
-  // Measure the text at its natural line breaks (explicit "\n") with NO auto-wrapping.
-  // Leaving width unset ('auto') is what makes Konva never split a line (wrap:'none' is
-  // just intent — with no fixed width it has no effect). So getTextWidth() is the widest
-  // natural line and height() is lines × lineHeight × fontSize. This lets the font grow to
-  // fill the zone WITHOUT breaking a long single word across lines (never what the user wants).
-  const probe = new Konva.Text({
-    text,
-    height: 'auto',
-    wrap: 'none',
-    align: 'left',
+  const shared = {
     fontFamily: fontFamily || undefined,
     fontStyle: fontStyle || undefined,
     lineHeight: lineHeight || undefined,
     letterSpacing: letterSpacing || undefined,
-  });
+  };
+
+  // Word-wrapped layout inside the zone width: multi-word text flows onto several lines,
+  // so height() reflects the real wrapped content height (height:'auto' → computed height).
+  const wrapProbe = new Konva.Text({ text, width, height: 'auto', wrap: 'word', align: 'left', ...shared });
+
+  // Single-word probe (no wrapping, no fixed width): we require the WIDEST word to fit the
+  // zone width so Konva never breaks a word mid-character. `words` are tokens split on any
+  // whitespace, including explicit line breaks.
+  const words = text.split(/\s+/).filter(Boolean);
+  const wordProbe = new Konva.Text({ wrap: 'none', align: 'left', ...shared });
 
   const fits = (fs) => {
-    probe.fontSize(fs); // fontSizeChange auto-recomputes the text geometry
-    return probe.height() <= height && probe.getTextWidth() <= width;
+    wrapProbe.fontSize(fs);
+    if (wrapProbe.height() > height) return false;         // wrapped text overflows vertically
+    wordProbe.fontSize(fs);
+    for (const w of words) {
+      wordProbe.text(w);
+      if (wordProbe.getTextWidth() > width) return false;  // this word would be broken
+    }
+    return true;
   };
 
   let lo = min, hi = max, best = min;
@@ -188,7 +197,8 @@ export function fitTextFontSize(opts) {
     if (fits(mid)) { best = mid; lo = mid + 1; }
     else { hi = mid - 1; }
   }
-  probe.destroy();
+  wrapProbe.destroy();
+  wordProbe.destroy();
   return best;
 }
 
