@@ -135,10 +135,11 @@ export function substituteEntityPlaceholders(value, row) {
 /* global Konva */
 
 /**
- * Compute the largest integer font size at which `text`, wrapped by word inside a
- * box of the given width/height, still fits within both the width and the height of
- * that box. Powers the "auto font size" feature. Returns minFontSize when even the
- * smallest size overflows (text is allowed to overflow only in that degenerate case).
+ * Compute the largest integer font size at which each of `text`'s natural
+ * ("\n"-delimited) lines fits the box width and the total height fits the box height.
+ * No word-wrapping is performed: a long single word shrinks to fit on one line instead
+ * of being broken across lines. Powers the "auto font size" feature. Returns minFontSize
+ * when even the smallest size overflows (text is allowed to overflow only in that case).
  *
  * @param {Object}  opts
  * @param {string}  opts.text            placeholder-substituted text content
@@ -159,12 +160,15 @@ export function fitTextFontSize(opts) {
   const max = Math.max(min, Math.floor(height || 0));
   if (!text || !(width > 0) || !(height > 0)) return min;
 
-  // One reusable detached probe. height:'auto' makes height() return content height.
+  // Measure the text at its natural line breaks (explicit "\n") with NO auto-wrapping.
+  // Leaving width unset ('auto') is what makes Konva never split a line (wrap:'none' is
+  // just intent — with no fixed width it has no effect). So getTextWidth() is the widest
+  // natural line and height() is lines × lineHeight × fontSize. This lets the font grow to
+  // fill the zone WITHOUT breaking a long single word across lines (never what the user wants).
   const probe = new Konva.Text({
     text,
-    width,
     height: 'auto',
-    wrap: 'word',
+    wrap: 'none',
     align: 'left',
     fontFamily: fontFamily || undefined,
     fontStyle: fontStyle || undefined,
