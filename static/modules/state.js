@@ -6,6 +6,7 @@ export const PDF_DPI = 600;               // Output resolution for PDF export
 export const PREVIEW_PIXEL_RATIO = 3;     // Pixel ratio for preview strip rendering
 export const PREVIEW_DEBOUNCE_MS = 10;    // Delay before re-rendering preview strip (ms)
 export const DEFAULT_FONT_SIZE = 20;      // Default font size for newly added text nodes
+export const AUTO_FONT_SIZE_MAX = 25;     // Upper bound (px) for auto-fitted font size
 export const HISTORY_MAX = 200;           // Maximum undo/redo history depth
 
 export const appState = {

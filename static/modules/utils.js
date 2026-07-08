@@ -1,4 +1,4 @@
-import { appState } from './state.js';
+import { appState, AUTO_FONT_SIZE_MAX } from './state.js';
 
 // ── Helpers ─────────────────────────────────────────────────────
 
@@ -150,14 +150,15 @@ export function substituteEntityPlaceholders(value, row) {
  * @param {number}  [opts.lineHeight]
  * @param {number}  [opts.letterSpacing]
  * @param {number}  [opts.minFontSize=4]
+ * @param {number}  [opts.maxFontSize=25]  hard upper cap on the resulting font size (px)
  * @returns {number} best integer font size
  */
 export function fitTextFontSize(opts) {
-  const { text, width, height, fontFamily, fontStyle, lineHeight, letterSpacing, minFontSize = 4 } = opts || {};
+  const { text, width, height, fontFamily, fontStyle, lineHeight, letterSpacing, minFontSize = 4, maxFontSize = AUTO_FONT_SIZE_MAX } = opts || {};
   const min = Math.max(1, Math.floor(minFontSize));
-  // A single line is `fontSize` tall (lineHeight defaults to 1), so the font can
-  // never exceed the zone height — that is the natural search upper bound.
-  const max = Math.max(min, Math.floor(height || 0));
+  // Upper search bound: the font can never be taller than the zone (a single line is
+  // `fontSize` tall at lineHeight 1) and must also respect the configured cap; never below `min`.
+  const max = Math.max(min, Math.min(Math.floor(height || 0), Math.floor(maxFontSize)));
   if (!text || !(width > 0) || !(height > 0)) return min;
 
   // Measure the text at its natural line breaks (explicit "\n") with NO auto-wrapping.
