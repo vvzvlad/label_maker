@@ -1,0 +1,246 @@
+name: Tests
+
+# PR gate. This workflow deliberately never logs in to the registry and never
+# pushes: it does not reference `secrets` at all. It proves that BOTH images still
+# build and that both still start and serve, while :latest — the tag production
+# deploys from for `labeler` and for `labeler-offline` — stays untouched by PR
+# branches. That is the hole this repo used to have: the two old GitHub workflows
+# triggered on pull_request and pushed :latest with no gate whatsoever, so any PR
+# branch overwrote what production pulls.
+on:
+  # Manual re-run: without it a run that flaked on runner networking could only be
+  # retried by pushing an empty commit to the PR branch. Safe to expose here — this
+  # workflow touches no registry and no secrets, it only builds and smoke-tests.
+  workflow_dispatch:
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read   # checkout
+
+# Nothing here is published, so a superseded run has no value: when a PR gets a new
+# push, kill the in-flight check and run the fresh head instead. This is the opposite
+# of image-check-publish.yml, where cancelling would leave holes in the :<sha> tag
+# history.
+# Workflow-level, so ONE group covers both matrix legs — a new push should cancel the
+# whole previous check, not race one leg against the other.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-smoke:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    # cirunner-hatbox is shared by every repository in the fleet, so a hung step does
+    # not just stall this run — it holds a runner slot that everyone else is queueing
+    # for. Gitea's own default is far too generous for that.
+    # The budget is set by the HEAVY leg, not the light one: Dockerfile.backend runs
+    # `playwright install --with-deps chromium`, which is a large apt install plus a
+    # ~150 MB browser download, so the plain image's 1-3 minute build says nothing
+    # about the worst case. 40 minutes is the outer bound around a 30-minute build
+    # and a 5-minute smoke.
+    # The readiness poll below is bounded at 30 ATTEMPTS, not 30 seconds: ~35-45s when
+    # the port is refused outright, but up to ~2 minutes when something accepts the
+    # connection and then never answers; `docker build` and `docker exec` have no
+    # bound at all.
+    timeout-minutes: 40
+    strategy:
+      # The same matrix as image-check-publish.yml, on purpose: the PR gate must
+      # cover exactly the two images the publishing workflow ships, with exactly the
+      # same expectations. A gate that checked only one of them would let a broken
+      # Dockerfile.backend through review untouched.
+      #
+      # `expect_pdf_api` is the one behavioural difference between the two images and
+      # is handed to ci/smoke.py: Dockerfile.backend sets `ENV ENABLE_PDF_API=1`,
+      # which registers `POST /api/generate-pdf` in src/api.py; the plain Dockerfile
+      # does not.
+      #
+      # `suffix` here only keeps the two legs from colliding on the shared runner
+      # daemon — nothing in this workflow ever builds a registry path.
+      #
+      # fail-fast OFF: one red leg must not hide the state of the other. A reviewer
+      # wants to see the full breakage in one run, exactly like ci/smoke.py checking
+      # every target before it reports.
+      fail-fast: false
+      matrix:
+        include:
+          - name: label_maker
+            dockerfile: Dockerfile
+            suffix: ""
+            expect_pdf_api: "0"
+          - name: label_maker-backend
+            dockerfile: Dockerfile.backend
+            suffix: "-backend"
+            expect_pdf_api: "1"
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Compute the local image tag
+      id: tags
+      # A purely local tag: no registry host in front of it, so there is nothing here
+      # that `docker push` could even target. The run id keeps concurrent PR checks on
+      # the shared runner daemon from clobbering each other's tag, and the matrix
+      # suffix keeps the two legs of the SAME run from clobbering each other's.
+      env:
+        RUN_ID: ${{ github.run_id }}
+        SUFFIX: ${{ matrix.suffix }}
+      run: |
+        echo "local=label-maker-pr-check${SUFFIX}:$RUN_ID" >> "$GITHUB_OUTPUT"
+
+    - name: Build the Docker image
+      # Step-level `timeout-minutes` is the one known to be enforced by Gitea's
+      # act_runner; the job-level one above is only the outer bound.
+      # 30 minutes is sized for the BACKEND leg, which is the expensive one:
+      # `playwright install --with-deps chromium` pulls a large pile of apt
+      # dependencies and downloads a ~150 MB browser build, and both come off the
+      # network on a cold cache. The plain leg finishes in a couple of minutes and
+      # simply never comes close to this bound — one number for both legs is fine
+      # as long as it is the heavy leg's number.
+      timeout-minutes: 30
+      env:
+        # Through the environment rather than interpolated into the script text,
+        # same rule as everywhere else in this repo's workflows.
+        LOCAL_TAG: ${{ steps.tags.outputs.local }}
+        # Dockerfile or Dockerfile.backend, straight from the matrix.
+        DOCKERFILE: ${{ matrix.dockerfile }}
+      run: |
+        # --pull for the same reason as in image-check-publish.yml: cirunner-hatbox
+        # is self-hosted with a persistent docker daemon, so without the flag a stale
+        # python:3.11-slim could sit in the cache for months. And as there, this is a
+        # BuildKit build despite the absence of `docker buildx` — that has been
+        # `docker build`'s default since Engine 23.0.
+        docker build --pull . --file "$DOCKERFILE" --tag "$LOCAL_TAG"
+
+    - name: Smoke-test the built image
+      # There are no unit tests in this repo, so this is the whole PR gate. It runs
+      # the exact same ci/smoke.py against the exact same kind of container as
+      # image-check-publish.yml — only on a local tag, with no login and no push.
+      # Keeping the script in one file is the point: two copies of it would drift,
+      # and the PR gate would stop matching the gate that guards prod. The `run:`
+      # body below is byte-identical to the one in image-check-publish.yml for the
+      # same reason.
+      #
+      # The container starts with the image's OWN command — no `--entrypoint`, which
+      # would also drop the image's CMD and leave "does the container even start"
+      # untested (neither image has an ENTRYPOINT, only `CMD ["python", "main.py"]`).
+      #
+      # For the backend leg that is the entire chromium check as well: src/api.py
+      # launches the browser in FastAPI's `lifespan` startup hook, so a broken
+      # `playwright install` makes uvicorn die during startup instead of serving.
+      #
+      # Nothing is published to the host: the checks run from inside via
+      # `docker exec`, so parallel runs on this shared daemon cannot collide on a
+      # host port. The container name carries BOTH the run id and the matrix suffix,
+      # since the two legs run concurrently against the same docker daemon.
+      #
+      # Step-level `timeout-minutes`, the one act_runner is known to enforce (the
+      # job-level one is only the outer bound). 5 minutes comfortably covers
+      # `docker run`, the readiness loop's ~2-minute worst case and the smoke script
+      # itself — chromium's own startup inside the backend image is seconds, not
+      # minutes.
+      timeout-minutes: 5
+      env:
+        SMOKE_TAG: ${{ steps.tags.outputs.local }}
+        NAME: label-maker-pr-check-${{ github.run_id }}${{ matrix.suffix }}
+        # "0" for the plain image, "1" for the backend one. Passed into the container
+        # as an environment variable rather than interpolated into the script text —
+        # ci/smoke.py is fed over stdin and must stay a fixed, unmodified file.
+        EXPECT_PDF_API: ${{ matrix.expect_pdf_api }}
+      run: |
+        docker run -d --name "$NAME" "$SMOKE_TAG"
+
+        # Poll instead of sleeping a guessed amount: a sleep long enough to be safe
+        # is wasted on every run, and a short one turns a slow start into a flake.
+        # Port 8000 is what main.py falls back to when PORT is unset, and nothing
+        # here sets it.
+        #
+        # Ready means "the server produced an HTTP response of ANY kind" — judging
+        # that response is ci/smoke.py's job, not this loop's. `urlopen` raises
+        # HTTPError on every 4xx/5xx, so an app that started perfectly well and
+        # answers 500 would otherwise never satisfy the probe. The container is
+        # alive, so the exited-container bail-out below would not fire either: the
+        # run would burn all 30 iterations and die right here, without ever reaching
+        # the smoke test that would have named the cause on its first request.
+        # HTTPError is therefore caught and counts as ready; every other exception
+        # (connection refused, timeout) still means not-ready.
+        #
+        # The program lives in a shell variable because it needs real newlines:
+        # try/except cannot be folded onto one `;`-joined line, and `python -c`
+        # rejects a leading-space `import`, so every line sits at this block's base
+        # indentation — YAML strips exactly that much, leaving the shell string
+        # unindented. It is single-quoted so the shell expands nothing inside it,
+        # which is why the python code below uses double quotes.
+        PROBE='
+        import urllib.error
+        import urllib.request
+        try:
+            urllib.request.urlopen("http://127.0.0.1:8000/", timeout=2)
+        except urllib.error.HTTPError:
+            pass
+        '
+        ready=""
+        for _ in $(seq 1 30); do
+          if docker exec "$NAME" python -c "$PROBE" >/dev/null 2>&1; then
+            ready=1
+            break
+          fi
+          # A container that has already exited will never become ready — report it
+          # now rather than sitting out the whole timeout. This is the common failure
+          # mode of the backend image: a browser that cannot launch raises inside the
+          # FastAPI lifespan hook and uvicorn exits within seconds.
+          if [ "$(docker inspect -f '{{.State.Running}}' "$NAME")" != "true" ]; then
+            break
+          fi
+          sleep 1
+        done
+
+        if [ -z "$ready" ]; then
+          echo "container produced no HTTP response at all on 127.0.0.1:8000 in 30 attempts (~35-45s when the port is refused outright, up to ~2 min when something accepts the connection and then never answers) — not even an error status (it exited, or nothing ever listened); container logs:"
+          # Without this there is nothing left to diagnose from: the cleanup step
+          # below removes the container.
+          docker logs "$NAME"
+          exit 1
+        fi
+
+        # Fed over stdin, so the image does not have to carry the test file and the
+        # very same script can be run by hand against a local container. The `-e`
+        # tells the one shared script which of the two images it is looking at.
+        if ! docker exec -e EXPECT_PDF_API="$EXPECT_PDF_API" -i "$NAME" python - < ci/smoke.py; then
+          echo "smoke failed; container logs:"
+          docker logs "$NAME"
+          exit 1
+        fi
+
+    - name: Remove the smoke container from the runner
+      # `always()`, and before the image cleanup below: cirunner-hatbox has one
+      # persistent docker daemon shared by every repository, so a container left
+      # behind by a failed run would sit there forever — and would also pin the
+      # image, making the `docker rmi` in the next step fail.
+      if: always()
+      env:
+        # Must match the name used in the smoke step exactly, suffix included:
+        # dropping the suffix here would make one leg delete the other leg's
+        # container out from under it.
+        NAME: label-maker-pr-check-${{ github.run_id }}${{ matrix.suffix }}
+      run: |
+        docker rm -f "$NAME" || true
+
+    - name: Remove the built image from the runner
+      # The runner's docker daemon is persistent and shared with other repos, so every
+      # PR check would otherwise leave an image behind forever — and this workflow
+      # leaves TWO per run, one of them carrying chromium and its apt dependencies.
+      # Removes ONLY the tag this leg created — no `docker system prune`.
+      # It does NOT reclaim everything: `docker rmi <tag>` never frees the BuildKit
+      # cache (a separate builder store, reclaimed only by `docker builder prune`),
+      # and `--pull` leaves the previous base image dangling whenever upstream updates
+      # python:3.11-slim. This gate runs on every push to a PR, so it produces MORE of
+      # that garbage on the shared runner daemon than the publishing workflow does —
+      # see the full note in image-check-publish.yml.
+      # Both need a separate periodic cleanup on the runner host.
+      # `always()` so a failed smoke still cleans up after itself.
+      if: always()
+      env:
+        LOCAL_TAG: ${{ steps.tags.outputs.local }}
+      run: |
+        docker rmi "$LOCAL_TAG" || true

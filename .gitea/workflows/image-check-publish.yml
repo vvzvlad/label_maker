@@ -1,0 +1,358 @@
+name: Docker Image CI
+
+# No `pull_request` trigger here on purpose. This workflow pushes :latest for BOTH
+# images, and both are live in production: `label_maker` runs as `labeler` behind
+# labeler.asakusa-lab.cc, and `label_maker-backend` runs as `labeler-offline` on
+# asakusa-infra, where the Telegram print bot calls it at http://labeler-offline:8000.
+# A build off any PR branch would therefore ship straight to both. That is exactly
+# what the two old GitHub workflows did: each triggered on pull_request and pushed
+# :latest unconditionally, with no gate of any kind. PRs are covered by tests.yml,
+# which builds and smoke-tests but never logs in and never pushes.
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+
+# No `packages: write` here: that scope is GitHub-specific and has no effect on Gitea
+# Actions — the built-in GITEA_TOKEN carries no package scope at all. The registry push
+# below authenticates with the REGISTRY_TOKEN PAT (an organisation-level secret on
+# `projects`, inherited by this repo) instead.
+permissions:
+  contents: read   # checkout
+
+# Two pushes to the same branch in a row must not race: the runs are independent and
+# the older one may finish last, leaving its :latest on the registry — a redeploy
+# would then ship the previous commit to prod.
+# The group alone already fixes that: runs are serialised, so the newest commit's
+# :latest is written last. Cancelling is deliberately OFF — it would kill the older
+# run together with its :<sha> image, and on two quick pushes the intermediate commit
+# would never be built, leaving holes in the tag history exactly where a rollback is
+# most likely to be needed.
+# This block is workflow-level, so ONE group covers both matrix legs: the two images
+# are built from the same commit and must not be serialised against each other, only
+# against other runs of this workflow on the same ref.
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    # cirunner-hatbox is shared by every repository in the fleet, so a hung step does
+    # not just stall this run — it holds a runner slot that everyone else is queueing
+    # for. Gitea's own default is far too generous for that.
+    # The budget is set by the HEAVY leg, not the light one: Dockerfile.backend runs
+    # `playwright install --with-deps chromium`, which is a large apt install plus a
+    # ~150 MB browser download, so the plain image's 1-3 minute build says nothing
+    # about the worst case. 40 minutes is the outer bound around a 30-minute build
+    # and a 5-minute smoke.
+    # The readiness poll below is bounded at 30 ATTEMPTS, not 30 seconds: ~35-45s when
+    # the port is refused outright, but up to ~2 minutes when something accepts the
+    # connection and then never answers; `docker build` and `docker exec` have no
+    # bound at all.
+    timeout-minutes: 40
+    strategy:
+      # This repository builds TWO images from one tree, and every step below —
+      # tag computation, build, smoke, push, cleanup — reads from this matrix. That
+      # is the whole point: the old setup was two hand-copied GitHub workflows, and
+      # a matrix makes it structurally impossible for the two to drift apart in their
+      # build/push/cleanup logic.
+      #
+      # `suffix` is what turns `label_maker` into `label_maker-backend`, mirroring the
+      # old `ghcr.io/${{ github.repository }}-backend` naming so the deployed image
+      # paths stay exactly where production expects them.
+      #
+      # `expect_pdf_api` is the one behavioural difference between the two images and
+      # is handed to ci/smoke.py: Dockerfile.backend sets `ENV ENABLE_PDF_API=1`,
+      # which registers `POST /api/generate-pdf` in src/api.py; the plain Dockerfile
+      # does not. Checking it is what stops the two images from being silently swapped.
+      #
+      # fail-fast OFF: the two images are independent deployments. A failure in one
+      # leg must not cancel the other mid-push and leave it without its :<sha>, and a
+      # broken plain image is no reason to withhold a good backend image (or the
+      # reverse) from a hotfix.
+      fail-fast: false
+      matrix:
+        include:
+          - name: label_maker
+            dockerfile: Dockerfile
+            suffix: ""
+            expect_pdf_api: "0"
+          - name: label_maker-backend
+            dockerfile: Dockerfile.backend
+            suffix: "-backend"
+            expect_pdf_api: "1"
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Compute image tags
+      id: tags
+      # main -> :latest + :<sha>; ANY other branch -> :<branch>.
+      # The check is against `main` because that is this repo's default branch — a
+      # repo living on `master` with a `main` check here would build happily and
+      # never once produce the :latest that production actually pulls.
+      # Only main is pushed to by the trigger above, but workflow_dispatch can be fired
+      # off any ref, so the else branch still has to be correct.
+      # Do NOT hardcode a fixed tag in the else branch: a build off a side branch would
+      # then silently overwrite the tag production deploys from — one typo away from
+      # shipping unreviewed code to labeler.asakusa-lab.cc or to the print bot.
+      env:
+        # Passed through the environment instead of being interpolated into the
+        # script text: git allows `$`, backticks, quotes and parentheses in branch
+        # names, so a branch like `feat/$(id)` would otherwise execute on the runner,
+        # which is self-hosted and mounts the host's docker socket.
+        REF_NAME: ${{ github.ref_name }}
+        REPO: ${{ github.repository }}
+        SHA: ${{ github.sha }}
+        # "" for the plain image, "-backend" for the playwright one.
+        SUFFIX: ${{ matrix.suffix }}
+      run: |
+        # Gitea allows uppercase letters in repository names, docker does not accept
+        # them in an image path — a repo like `Label_Maker` would fail the build with
+        # `invalid reference format`, so lowercase it here. The suffix is appended
+        # after the lowercased path, giving exactly the two paths production pulls:
+        # gitea.vvzvlad.xyz/projects/label_maker and .../label_maker-backend.
+        IMAGE="gitea.vvzvlad.xyz/$(printf '%s' "$REPO" | tr 'A-Z' 'a-z')$SUFFIX"
+        if [ "$REF_NAME" = "main" ]; then
+          # Tag ORDER matters and must not be "tidied up": the push step iterates
+          # over $TAGS left to right, so :latest is pushed LAST and acts as the
+          # commit of the whole publication. If :<sha> fails to push (network,
+          # registry quota, disk), the run stops before :latest moves and prod keeps
+          # running the previous image. The reverse order would publish a :latest
+          # that a redeploy picks up while its immutable :<sha> twin — the only
+          # rollback point — never made it to the registry.
+          echo "tags=$IMAGE:$SHA $IMAGE:latest" >> "$GITHUB_OUTPUT"
+          # The smoke gate needs ONE unambiguous tag out of the list above. The
+          # :<sha> one is it — :latest is a moving target shared with whatever ran
+          # before, :<sha> can only ever mean this commit's image.
+          echo "smoke=$IMAGE:$SHA" >> "$GITHUB_OUTPUT"
+        else
+          # Sanitise the branch name into a legal docker tag: everything outside
+          # [A-Za-z0-9_.-] (a `/` in feat/foo above all) becomes `-`, and the result
+          # is cut to 100 chars — branch names have no length limit, docker rejects
+          # tags over 128.
+          # The `sed` fixes the first character: docker requires a tag to match
+          # [a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}, so a branch like `-fix`, `(test)` or
+          # `+wip` would otherwise produce a leading `-` and fail the build with
+          # `invalid reference format`.
+          branch_tag=$(printf '%s' "$REF_NAME" | tr -c 'A-Za-z0-9_.-' '-' | sed 's/^[^A-Za-z0-9_]/_/' | cut -c1-100)
+          # The sanitiser passes a name through untouched when it already consists of
+          # legal characters, so a branch literally named `latest` would come out as
+          # the production tag and — one manual workflow_dispatch later — ship
+          # unreviewed code to prod. The `main` check above does not cover this: the
+          # branch is not `main`, it only borrows its tag.
+          # Reserved names are therefore prefixed instead of being used as-is.
+          if [ "$branch_tag" = "latest" ]; then
+            branch_tag="branch-latest"
+          fi
+          echo "tags=$IMAGE:${branch_tag}" >> "$GITHUB_OUTPUT"
+          echo "smoke=$IMAGE:${branch_tag}" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Build the Docker image
+      # Step-level `timeout-minutes` is the one known to be enforced by Gitea's
+      # act_runner; the job-level one above is only the outer bound.
+      # 30 minutes is sized for the BACKEND leg, which is the expensive one:
+      # `playwright install --with-deps chromium` pulls a large pile of apt
+      # dependencies and downloads a ~150 MB browser build, and both come off the
+      # network on a cold cache. The plain leg finishes in a couple of minutes and
+      # simply never comes close to this bound — one number for both legs is fine
+      # as long as it is the heavy leg's number.
+      timeout-minutes: 30
+      env:
+        # Through the environment, not interpolated into the script text: the only
+        # thing standing between a branch name and command execution on the runner is
+        # the `tr` filter in the step above. `$TAGS` below is intentionally unquoted —
+        # the tags are a space-separated list and word splitting is exactly what turns
+        # it into loop items.
+        TAGS: ${{ steps.tags.outputs.tags }}
+        # Dockerfile or Dockerfile.backend, straight from the matrix.
+        DOCKERFILE: ${{ matrix.dockerfile }}
+      run: |
+        tag_args=""
+        for tag in $TAGS; do tag_args="$tag_args --tag $tag"; done
+        # --pull is required here: unlike GitHub's ephemeral runners, cirunner-hatbox
+        # is self-hosted with a persistent docker daemon, so without the flag the once
+        # pulled python:3.11-slim would sit in its cache for months and every build
+        # would inherit an unpatched base layer.
+        # Note that this IS a BuildKit build even though no `docker buildx` appears on
+        # the line: BuildKit has been `docker build`'s default since Engine 23.0. It
+        # caches into its own builder store, which is why the cleanup step at the end
+        # of this job cannot reclaim everything — see the caveat there.
+        docker build --pull . --file "$DOCKERFILE" $tag_args
+
+    - name: Smoke-test the built image
+      # There are no unit tests in this repo, so this is the only gate before :latest
+      # goes live for either image. It sits BETWEEN build and push on purpose: a red
+      # smoke means nothing reaches the registry, so prod keeps serving the previous
+      # image.
+      #
+      # The container is started with the image's OWN command — no `--entrypoint`,
+      # which does not merely replace the entrypoint but also DROPS the image's CMD.
+      # Neither image has an ENTRYPOINT at all, only `CMD ["python", "main.py"]`, so
+      # passing one would leave "does the container even start" untested: a broken
+      # `__main__` block, a bad WORKDIR or a typo in CMD would ship green.
+      #
+      # For the backend leg that is the entire chromium check as well: src/api.py
+      # launches the browser in FastAPI's `lifespan` startup hook, so a broken
+      # `playwright install` makes uvicorn die during startup instead of serving.
+      #
+      # Nothing is published to the host: the checks run from inside the container via
+      # `docker exec`, so parallel runs on this shared daemon cannot collide on a host
+      # port. The container name carries BOTH the run id and the matrix suffix — the
+      # two legs run concurrently against the same docker daemon and would otherwise
+      # fight over one name.
+      #
+      # The `run:` body below is byte-identical to the one in tests.yml: the PR gate
+      # and the publishing gate must test the same way, and the only difference is
+      # which tag the env block points at.
+      #
+      # Step-level `timeout-minutes`, the one act_runner is known to enforce (the
+      # job-level one is only the outer bound). 5 minutes comfortably covers
+      # `docker run`, the readiness loop's ~2-minute worst case and the smoke script
+      # itself — chromium's own startup inside the backend image is seconds, not
+      # minutes.
+      timeout-minutes: 5
+      env:
+        SMOKE_TAG: ${{ steps.tags.outputs.smoke }}
+        NAME: label-maker-smoke-${{ github.run_id }}${{ matrix.suffix }}
+        # "0" for the plain image, "1" for the backend one. Passed into the container
+        # as an environment variable rather than interpolated into the script text —
+        # ci/smoke.py is fed over stdin and must stay a fixed, unmodified file.
+        EXPECT_PDF_API: ${{ matrix.expect_pdf_api }}
+      run: |
+        docker run -d --name "$NAME" "$SMOKE_TAG"
+
+        # Poll instead of sleeping a guessed amount: a sleep long enough to be safe
+        # is wasted on every run, and a short one turns a slow start into a flake.
+        # Port 8000 is what main.py falls back to when PORT is unset, and nothing
+        # here sets it.
+        #
+        # Ready means "the server produced an HTTP response of ANY kind" — judging
+        # that response is ci/smoke.py's job, not this loop's. `urlopen` raises
+        # HTTPError on every 4xx/5xx, so an app that started perfectly well and
+        # answers 500 would otherwise never satisfy the probe. The container is
+        # alive, so the exited-container bail-out below would not fire either: the
+        # run would burn all 30 iterations and die right here, without ever reaching
+        # the smoke test that would have named the cause on its first request.
+        # HTTPError is therefore caught and counts as ready; every other exception
+        # (connection refused, timeout) still means not-ready.
+        #
+        # The program lives in a shell variable because it needs real newlines:
+        # try/except cannot be folded onto one `;`-joined line, and `python -c`
+        # rejects a leading-space `import`, so every line sits at this block's base
+        # indentation — YAML strips exactly that much, leaving the shell string
+        # unindented. It is single-quoted so the shell expands nothing inside it,
+        # which is why the python code below uses double quotes.
+        PROBE='
+        import urllib.error
+        import urllib.request
+        try:
+            urllib.request.urlopen("http://127.0.0.1:8000/", timeout=2)
+        except urllib.error.HTTPError:
+            pass
+        '
+        ready=""
+        for _ in $(seq 1 30); do
+          if docker exec "$NAME" python -c "$PROBE" >/dev/null 2>&1; then
+            ready=1
+            break
+          fi
+          # A container that has already exited will never become ready — report it
+          # now rather than sitting out the whole timeout. This is the common failure
+          # mode of the backend image: a browser that cannot launch raises inside the
+          # FastAPI lifespan hook and uvicorn exits within seconds.
+          if [ "$(docker inspect -f '{{.State.Running}}' "$NAME")" != "true" ]; then
+            break
+          fi
+          sleep 1
+        done
+
+        if [ -z "$ready" ]; then
+          echo "container produced no HTTP response at all on 127.0.0.1:8000 in 30 attempts (~35-45s when the port is refused outright, up to ~2 min when something accepts the connection and then never answers) — not even an error status (it exited, or nothing ever listened); container logs:"
+          # Without this there is nothing left to diagnose from: the cleanup step
+          # below removes the container.
+          docker logs "$NAME"
+          exit 1
+        fi
+
+        # Fed over stdin, so the image does not have to carry the test file and the
+        # very same script can be run by hand against a local container. The `-e`
+        # tells the one shared script which of the two images it is looking at.
+        if ! docker exec -e EXPECT_PDF_API="$EXPECT_PDF_API" -i "$NAME" python - < ci/smoke.py; then
+          echo "smoke failed; container logs:"
+          docker logs "$NAME"
+          exit 1
+        fi
+
+    - name: Log in to the Gitea container registry
+      # Deliberately placed here and not at the top of the job: `docker build` runs
+      # arbitrary RUN instructions from the Dockerfile (this repo's backend image
+      # runs a `playwright install` that downloads and executes third-party payloads)
+      # and the smoke step runs the image's own code, both on a runner whose
+      # docker.sock is the host's. Logging in only now keeps the registry credentials
+      # out of the job's docker config for the whole build-and-test stretch.
+      uses: docker/login-action@v4
+      with:
+        registry: gitea.vvzvlad.xyz
+        username: ${{ github.repository_owner }}
+        # PAT with the `write:package` scope, stored as an organisation secret on
+        # `projects` and inherited here — do not add a repo-level secret of the same
+        # name, it would shadow the org one. The built-in GITEA_TOKEN cannot be used:
+        # it carries no package scope.
+        password: ${{ secrets.REGISTRY_TOKEN }}
+
+    - name: Push Docker images
+      # Step-level `timeout-minutes`, the one act_runner is known to enforce (the
+      # job-level one is only the outer bound). This step is the most likely of the
+      # whole job to hang: the backend leg ships roughly a gigabyte of chromium image
+      # over the network, and a stalled TCP connection to the registry would otherwise
+      # sit here indefinitely, holding a slot on cirunner-hatbox that the whole fleet
+      # is queueing for. 15 minutes is generous for a push of that size and still
+      # bounded.
+      timeout-minutes: 15
+      env:
+        # Same reasoning as in the build step: pass the tags through the environment,
+        # and leave `$TAGS` unquoted so it word-splits into items — which also
+        # preserves the :<sha>-before-:latest order computed above.
+        TAGS: ${{ steps.tags.outputs.tags }}
+      run: |
+        for tag in $TAGS; do docker push "$tag"; done
+
+    - name: Remove the smoke container from the runner
+      # `always()`, and before the image cleanup below: cirunner-hatbox has one
+      # persistent docker daemon shared by every repository, so a container left
+      # behind by a failed run would sit there forever — and would also pin the
+      # image, making the `docker rmi` in the next step fail.
+      if: always()
+      env:
+        # Must match the name used in the smoke step exactly, suffix included:
+        # dropping the suffix here would make one leg delete the other leg's
+        # container out from under it.
+        NAME: label-maker-smoke-${{ github.run_id }}${{ matrix.suffix }}
+      run: |
+        docker rm -f "$NAME" || true
+
+    - name: Remove the built images from the runner
+      # The runner's docker daemon is persistent, so the images built here would
+      # otherwise pile up and grow the disk forever — and the backend image is a
+      # heavy one, chromium and its apt dependencies included. This step removes ONLY
+      # the tags this run created — no `docker system prune`, which would also wipe
+      # images of other repos sharing the same daemon.
+      # It does NOT reclaim everything: `docker rmi <tag>` never touches the BuildKit
+      # cache (that lives in a separate builder store and is only freed by
+      # `docker builder prune`), and `--pull` above leaves the previous base image
+      # untagged as a dangling image whenever upstream updates python:3.11-slim.
+      # The BuildKit cache is the bigger of the two — `docker build` is BuildKit by
+      # default since Engine 23.0, and on a daemon shared by the whole fleet that
+      # store is the main source of disk growth.
+      # Both need a separate periodic cleanup on the runner host.
+      # `always()` so the cleanup runs even when the smoke or the push above fails.
+      if: always()
+      env:
+        # Same reasoning as in the build step: pass the tags through the environment,
+        # and leave `$TAGS` unquoted so it word-splits into items.
+        TAGS: ${{ steps.tags.outputs.tags }}
+      run: |
+        for tag in $TAGS; do docker rmi "$tag" || true; done
