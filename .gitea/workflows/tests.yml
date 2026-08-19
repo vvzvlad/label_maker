@@ -38,13 +38,25 @@ jobs:
     # The budget is set by the HEAVY leg, not the light one: Dockerfile.backend runs
     # `playwright install --with-deps chromium`, which is a large apt install plus a
     # ~150 MB browser download, so the plain image's 1-3 minute build says nothing
-    # about the worst case. 40 minutes is the outer bound around a 30-minute build
-    # and a 5-minute smoke.
+    # about the worst case.
+    # This number must stay comfortably ABOVE the sum of the step budgets below, and
+    # the arithmetic is written out here so the next person to edit a step budget can
+    # see at a glance whether it still fits: 30 (build) + 10 (smoke) = 40 minutes of
+    # step-level bounds, plus the unbudgeted checkout, the tag computation, the log
+    # dump and the two `always()` cleanups. 60 leaves ~20 minutes of slack over that
+    # sum; it used to be 40, i.e. exactly the sum, with nothing left for the rest.
+    # Why the slack is not cosmetic: a JOB-level timeout is act_runner killing the
+    # WHOLE job, so neither `Dump the smoke container logs` nor the `if: always()`
+    # container removal gets to run — that reproduces precisely the diagnostic hole
+    # the dump step was added to close, and leaves a container name and a dangling
+    # image behind on cirunner-hatbox, whose docker daemon the whole fleet shares.
+    # Hitting a STEP timeout is the good failure: only that step dies, and the dump
+    # and the cleanups still run.
     # The readiness poll below is bounded at 30 ATTEMPTS, not 30 seconds: ~35-45s when
     # the port is refused outright, but up to ~2 minutes when something accepts the
     # connection and then never answers; `docker build` and `docker exec` have no
     # bound at all.
-    timeout-minutes: 40
+    timeout-minutes: 60
     strategy:
       # The same matrix as image-check-publish.yml, on purpose: the PR gate must
       # cover exactly the two images the publishing workflow ships, with exactly the
@@ -135,11 +147,20 @@ jobs:
       # since the two legs run concurrently against the same docker daemon.
       #
       # Step-level `timeout-minutes`, the one act_runner is known to enforce (the
-      # job-level one is only the outer bound). 5 minutes comfortably covers
-      # `docker run`, the readiness loop's ~2-minute worst case and the smoke script
-      # itself — chromium's own startup inside the backend image is seconds, not
-      # minutes.
-      timeout-minutes: 5
+      # job-level one is only the outer bound). The budget is the sum of real worst
+      # cases rather than a round number: `docker run` and the container's start, the
+      # readiness loop's ~2-minute worst case, and then ci/smoke.py itself — which on
+      # the backend leg now drives a FULL page render in headless chromium under its
+      # own 60-second PDF_RENDER_TIMEOUT.
+      # That render is what the previous justification missed: it argued from
+      # "chromium's own startup inside the backend image is seconds, not minutes",
+      # which is true of LAUNCHING the browser and says nothing about driving it
+      # through goto + networkidle + a 600-DPI rasterisation + the PDF encode. ~2 min
+      # of readiness plus 60 s of render plus the remaining checks left the old
+      # 5-minute bound only a little above its own worst case — close enough that a
+      # slow runner would produce a timeout that reads like a broken render.
+      # 10 minutes keeps real headroom while still bounding a genuine hang.
+      timeout-minutes: 10
       env:
         SMOKE_TAG: ${{ steps.tags.outputs.local }}
         NAME: label-maker-pr-check-${{ github.run_id }}${{ matrix.suffix }}
@@ -211,6 +232,37 @@ jobs:
           docker logs "$NAME"
           exit 1
         fi
+
+    - name: Dump the smoke container logs
+      # Closes the diagnostic hole that only opens on the WORST failure. The smoke step
+      # above prints `docker logs` from two shell branches — readiness exhausted, smoke
+      # script red — but both of those need the step to still be running. When the step
+      # hits its own `timeout-minutes` the runner kills it mid-command, neither branch
+      # executes, and the cleanup step below (which is `always()`) then deletes the
+      # container. The one failure with the least information — a hung render, exactly
+      # the incident this whole change is about — was therefore also the one that
+      # destroyed its own evidence. On a PR that is the difference between a reviewer
+      # seeing the cause and seeing only "the step timed out".
+      #
+      # `if: failure()`, so it costs nothing on a green run, and placed BEFORE the
+      # cleanup step so the container still exists when it runs. It also fires when an
+      # earlier step failed and no container was ever created; `|| true` keeps that
+      # from turning a build failure into a confusing second red step. `2>&1` because
+      # uvicorn and the playwright traceback both go to stderr.
+      #
+      # `--tail 500` and not an unbounded dump: the failure this step exists for is a
+      # hung render, and src/api.py logs a `requestfailed` / `pageerror` warning per
+      # event while that render is going nowhere, so the log can run to megabytes. The
+      # END of it is where the cause is — the last requests and the traceback — while
+      # the head is startup noise. And an unbounded dump into the job log on a runner
+      # the whole fleet shares is a problem of its own. Raise the number if 500 lines
+      # ever turns out to cut off a real cause.
+      if: failure()
+      env:
+        # Same name as in the smoke step and the cleanup step, suffix included.
+        NAME: label-maker-pr-check-${{ github.run_id }}${{ matrix.suffix }}
+      run: |
+        docker logs --tail 500 "$NAME" 2>&1 || true
 
     - name: Remove the smoke container from the runner
       # `always()`, and before the image cleanup below: cirunner-hatbox has one

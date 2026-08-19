@@ -1,4 +1,22 @@
 fastapi
 uvicorn[standard]
 pydantic
-playwright
+# Pinned, unlike the three above, because the browser is the one moving part this repo's
+# gate cannot otherwise reproduce. 1.62.0 is not an arbitrary pick: it is the version
+# installed in the production `labeler-offline` container AND the version in the venv the
+# end-to-end render check in ci/smoke.py was validated against — a real PDF produced,
+# every asset fetched from localhost. What that run covers is written down in ci/smoke.py,
+# where it is actually checked; this file only pins the version. What the pin equalises
+# across CI, that validated run and production is the playwright client and the chromium
+# build it downloads — and nothing more: `fastapi`, `uvicorn[standard]` and `pydantic` are
+# deliberately unpinned, the base image is a floating `python:3.11-slim`, and
+# `playwright install --with-deps` pulls its apt packages from a repository that keeps
+# moving. This line makes the browser the same everywhere, not the whole environment.
+# `docker build --pull` was silently breaking exactly that: with a bare `playwright`, every
+# CI build could install a newer release, so a green gate would have been proving something
+# about an image nobody had ever run.
+# The real payload is the BROWSER, not the Python package: Dockerfile.backend runs
+# `playwright install --with-deps chromium` right after this pip install, and the chromium
+# build that command downloads is chosen by the playwright version — so this line pins the
+# browser too.
+playwright==1.62.0
