@@ -25,11 +25,19 @@ Three properties matter here and are easy to lose:
 * Failures leave through SystemExit, never `assert`. Asserts vanish under
   PYTHONOPTIMIZE=1 (a common slim-image tweak), which would silently turn this gate
   permanently green.
-* It never renders a real PDF. static/render.html pulls Konva, QRious and jsPDF from
-  cdn.jsdelivr.net and cdnjs.cloudflare.com, so an end-to-end render would depend on
-  two third-party CDNs being reachable from the runner: the gate would go red on
-  someone else's outage and block a perfectly good deploy. Do NOT "improve" this into
-  a real render — the hermetic check below is deliberate.
+* The render is HERMETIC, and that is precisely why it is now checked end to end.
+  Konva, QRious and jsPDF live in static/vendor/ and are loaded from /vendor/ (see
+  static/vendor/README.md), so static/render.html and its whole module graph reach no
+  third-party host: producing a real PDF touches nothing outside the container, and
+  the backend leg below therefore renders one and inspects the bytes.
+  What must never come back is an external `<script src="https://…">` in render.html.
+  That is what this gate exists to prevent: the libraries used to come from
+  cdn.jsdelivr.net and cdnjs.cloudflare.com, the Cloudflare addresses were blackholed
+  from the production host, chromium hung forever on the jsPDF script, `networkidle`
+  never fired and every print came back HTTP 500. Re-adding an external script would
+  both re-break production behind a blocked CDN and put this gate at the mercy of
+  someone else's uptime — red on their outage, blocking a perfectly good deploy. The
+  guard below rejects any external script src in render.html.
 
 For the backend image there is also no separate "did chromium start" probe, and none
 is needed: src/api.py starts playwright and launches chromium inside the FastAPI
@@ -42,6 +50,7 @@ Every target is checked before reporting, so one run shows the full extent of th
 breakage rather than only the first broken thing.
 """
 
+import json
 import os
 import posixpath
 import re
@@ -93,6 +102,43 @@ STATIC_ASSETS = [
     "/render.html",
 ]
 
+# The three libraries the renderer needs, vendored into static/vendor/ and served by the
+# image itself. Checked apart from STATIC_ASSETS because "non-empty" is far too weak for
+# them: what actually goes wrong with a vendored dependency is a truncated download or a
+# captive-portal / error page saved under a .js name, and both answer 200 with a body of
+# a few hundred bytes. A size FLOOR is the honest check — it catches every one of those
+# without pinning the gate to an exact byte count, so a deliberate version bump does not
+# turn it red. Each floor sits a little over a quarter of the real size (175354, 17579
+# and 364463 bytes today; the exact figures are in static/vendor/README.md).
+#
+# Their absence is invisible everywhere else: "/" and /render.html both answer a flawless
+# 200 with a missing /vendor/ directory, and the app is dead the moment a browser — or
+# headless chromium in the backend image — actually loads the page.
+VENDOR_ASSETS = [
+    ("/vendor/konva.min.js", 50000),
+    ("/vendor/qrious.min.js", 5000),
+    ("/vendor/jspdf.umd.min.js", 100000),
+]
+
+# Matches a <script> whose src points at another host: an absolute http(s):// URL or the
+# protocol-relative //host/… form. Everything the pages should load is same-origin and
+# root-relative (`/vendor/konva.min.js`, `./modules/utils.js`), so this pattern has no
+# legitimate match in render.html at all.
+EXTERNAL_SCRIPT_RE = re.compile(
+    r"""<script[^>]*\bsrc\s*=\s*["']((?:https?:)?//[^"']*)["']""", re.I)
+
+# Matches a src=/href= URL that would pull one of the three VENDORED libraries from a CDN
+# again — the exact regression static/vendor/ exists to prevent. Deliberately narrower
+# than EXTERNAL_SCRIPT_RE because index.html legitimately keeps loading Bootstrap, the
+# Bootstrap Icons font CSS and the rybbit analytics script from external hosts: only the
+# three libraries were vendored, and a guard that failed on any external URL there would
+# be a guard nobody could keep green. The host and the library name must appear inside the
+# SAME quoted attribute value, so the bootstrap@5.3.3 URL on the very next line does not
+# match.
+CDN_LIB_RE = re.compile(
+    r"""["']([^"']*(?:cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com)[^"']*"""
+    r"""(?:konva|qrious|jspdf)[^"']*)["']""", re.I)
+
 # The ES module graph is discovered, never hardcoded. A literal list of
 # static/modules/*.js would be a maintenance burden and would go stale the moment
 # someone adds or renames a module — and a stale list is worse than no list, because
@@ -114,9 +160,10 @@ STATIC_ASSETS = [
 MODULE_SOURCES = ["/app.js", "/render.html"]
 
 # The prefix a discovered reference must resolve under to be followed. This is a
-# deliberate limit of the walk to ONE directory, not a network guard: the CDN
-# dependencies (Konva, QRious, jsPDF, bootstrap) are already excluded by the regex
-# below, which only matches specifiers starting with `./` or `../`. What this
+# deliberate limit of the walk to ONE directory, not a network guard: the browser-global
+# libraries (Konva, QRious and jsPDF from /vendor/, bootstrap from a CDN) are plain
+# <script> tags rather than ES imports, and are already excluded by the regex below,
+# which only matches specifiers starting with `./` or `../`. What this
 # constant actually drops is a relative import resolving OUTSIDE /modules/ — say a
 # module moved to static/lib/ and imported as `../lib/shared.js`. Such a file would
 # then go unchecked, and the loud "nothing found" guard would not notice, because it
@@ -150,6 +197,37 @@ MODULE_REF_RE = re.compile(r"""from\s+['"](\.{1,2}/[A-Za-z0-9_./-]+\.js)['"]""")
 # Present only when ENABLE_PDF_API is set, which Dockerfile.backend does and
 # Dockerfile does not.
 PDF_API_ROUTE = "/api/generate-pdf"
+
+# The smallest label that still exercises the whole pipeline: src/api.py drives headless
+# chromium to /render.html, waits for networkidle, and calls window.renderPdf(); the page
+# needs Konva to build the stage and jsPDF to emit the document, so a single missing
+# /vendor/ file fails this and nothing else. The `%E1%` placeholder is substituted from
+# the row's entities, which also proves the module graph really executed rather than the
+# libraries merely being present. Validated against the live production renderer: 200,
+# application/pdf, 5163733 bytes in 1.18 s.
+PDF_RENDER_PAYLOAD = {
+    "template": {"version": 1, "widthMm": 58, "heightMm": 40, "nodes": [
+        {"type": "text", "text": "SMOKE %E1%", "x": 10, "y": 10, "rotation": 0,
+         "scaleX": 1, "scaleY": 1, "fontSize": 24, "fill": "#000000",
+         "width": 180, "height": 60, "align": "center", "verticalAlign": "middle"}]},
+    "rows": [{"entities": ["OK"]}],
+    "rotate": False,
+}
+
+# Its own budget, far above the file's 5 s TIMEOUT. A warm render answers in about 1.5 s,
+# but this is the FIRST page chromium opens in a freshly started container — the browser
+# still has to spin up a renderer process — and a CI runner is slower than the production
+# host. Five seconds would produce a flaky red that says "the render is broken" when the
+# render was merely starting up; sixty is generous enough that a timeout here means the
+# thing genuinely hung, which is exactly the failure mode this check is here to catch.
+PDF_RENDER_TIMEOUT = 60
+
+# A one-label PDF from this payload runs to megabytes (the renderer rasterises the label
+# at 600 DPI), so this floor is nowhere near it — it only has to be above what a stub, an
+# error page or a truncated response could be. A valid but EMPTY jsPDF document is a few
+# hundred bytes, and that is the real thing being excluded: a renderer that produced a
+# structurally fine PDF containing nothing at all.
+PDF_MIN_BYTES = 10 * 1024
 
 
 def fetch(route):
@@ -202,6 +280,101 @@ def check_asset(body, reason):
     # business.
     if not body:
         return "200 but the body is empty (0 bytes)"
+    return None
+
+
+def check_vendor_asset(body, reason, minimum):
+    """Return None when the vendored library answered 200 with a plausible size."""
+    problem = check_asset(body, reason)
+    if problem is not None:
+        return problem
+    if len(body) < minimum:
+        return ("200 but only {} bytes, below the {} byte floor — that is not the "
+                "library: a truncated copy, a placeholder, or an error page saved "
+                "under a .js name".format(len(body), minimum))
+    return None
+
+
+def html_text(body):
+    """Decode a fetched page for scanning; None when there is nothing to scan."""
+    # A None body means the route's own fetch already failed and is already reported as
+    # a broken target — the guards below turn that into an explicit "not checked" rather
+    # than printing a green ok for a check that never looked at anything.
+    if body is None:
+        return None
+    return body.decode("utf-8", "replace")
+
+
+def check_no_external_scripts(body):
+    """Return None when the page loads no <script> from any external host."""
+    text = html_text(body)
+    if text is None:
+        return "not checked: the page did not load (its own failure is reported above)"
+    external = EXTERNAL_SCRIPT_RE.findall(text)
+    if external:
+        # Every offending URL is listed, not just the first: a change that re-adds one
+        # library usually re-adds all three, and seeing them together is the diagnosis.
+        return ("{} external <script src> back in the page — the renderer must load "
+                "nothing from a third-party host (vendor it into static/vendor/ "
+                "instead): {}".format(len(external),
+                                      ", ".join(repr(url) for url in external)))
+    return None
+
+
+def check_no_cdn_libs(body):
+    """Return None when none of the three vendored libraries is loaded from a CDN."""
+    text = html_text(body)
+    if text is None:
+        return "not checked: the page did not load (its own failure is reported above)"
+    cdn_libs = CDN_LIB_RE.findall(text)
+    if cdn_libs:
+        return ("{} of the vendored libraries loaded from a CDN again — they must come "
+                "from /vendor/: {}".format(len(cdn_libs),
+                                           ", ".join(repr(url) for url in cdn_libs)))
+    return None
+
+
+def check_pdf_render():
+    """Return None when POST to the PDF API really produced a PDF."""
+    request = urllib.request.Request(
+        BASE_URL + PDF_API_ROUTE,
+        data=json.dumps(PDF_RENDER_PAYLOAD).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=PDF_RENDER_TIMEOUT) as response:
+            status = response.status
+            content_type = response.headers.get("Content-Type", "")
+            body = response.read()
+    except urllib.error.HTTPError as error:
+        # The error body is read and truncated hard: src/api.py lets the playwright
+        # exception reach FastAPI, so the first few hundred characters name the actual
+        # cause (a goto timeout, a pageerror) instead of leaving a bare "HTTP 500".
+        detail = error.read()[:500].decode("utf-8", "replace")
+        return "HTTP {}: {}".format(error.code, detail)
+    except Exception as error:
+        return "{}: {}".format(type(error).__name__, error)
+
+    # Three independent ways for this to be wrong, all reported together: a non-PDF
+    # content type, a body that is not a PDF, and a PDF with nothing in it.
+    problems = []
+    if status != 200:
+        problems.append("HTTP {}".format(status))
+    if not content_type.lower().startswith("application/pdf"):
+        problems.append("content-type is {!r}, not application/pdf".format(content_type))
+    # Only the magic number is ever looked at, and only its first bytes are ever printed:
+    # the body is several megabytes and must not end up in a log or in a variable that
+    # gets formatted into one.
+    if not body.startswith(b"%PDF-"):
+        problems.append("body does not start with %PDF- (starts with {!r})".format(
+            body[:8]))
+    if len(body) <= PDF_MIN_BYTES:
+        problems.append("body is only {} bytes, at or below the {} byte floor — the "
+                        "render produced an empty document".format(
+                            len(body), PDF_MIN_BYTES))
+    if problems:
+        return "; ".join(problems)
     return None
 
 
@@ -359,12 +532,31 @@ def main():
         bodies[route] = body
         results.append((route, check_asset(body, reason)))
 
+    for route, minimum in VENDOR_ASSETS:
+        body, reason = fetch(route)
+        results.append((route, check_vendor_asset(body, reason, minimum)))
+
     # Reuses the bodies already fetched above — the entry points are both in
     # STATIC_ASSETS, so there is no point in asking for them twice.
     results.extend(check_modules(bodies))
 
+    # Both guards read a body already fetched: "/" IS index.html (StaticFiles is mounted
+    # with html=True) and /render.html is in STATIC_ASSETS, so neither page is requested
+    # a second time.
+    results.append(("/render.html (no external <script src>)",
+                    check_no_external_scripts(bodies.get("/render.html"))))
+    results.append(("/ index.html (konva/qrious/jspdf not from a CDN)",
+                    check_no_cdn_libs(bodies.get("/"))))
+
     results.append(("POST " + PDF_API_ROUTE + " (EXPECT_PDF_API={})".format(
         "1" if expect_pdf_api else "0"), check_pdf_api(expect_pdf_api)))
+
+    # Backend image only. The plain image has no route to render with — check_pdf_api
+    # above already asserted it answers 404/405 — and posting a real payload at it would
+    # only re-check the same 405.
+    if expect_pdf_api:
+        results.append(("POST " + PDF_API_ROUTE + " -> real PDF render",
+                        check_pdf_render()))
 
     failures = []
     for target, reason in results:
