@@ -22,17 +22,9 @@ BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 _static_dir = os.path.join(BASE_DIR, "static")
 
 logger = logging.getLogger("label_maker.pdf")
-# Deliberately no `setLevel` and no handler here. Nothing in this repo calls
-# `basicConfig`/`dictConfig`, and main.py runs uvicorn with its default logging config,
-# which configures only the `uvicorn*` loggers and leaves the root one untouched — so
-# records from this logger end up at `logging.lastResort`: stderr, WARNING and above,
-# no formatting. That is exactly why `logger.warning(...)` and `logger.exception(...)`
-# below DO appear in `docker logs` (the error reporting in generate_pdf relies on it),
-# and why a future `logger.info(...)` would vanish without a trace. A
-# `setLevel(logging.INFO)` used to sit here implying the opposite: it lowers this
-# logger's own threshold but not lastResort's, so it never made an INFO record visible.
-# Making INFO actually work means configuring handlers for the app, which is a bigger
-# decision than this line should make.
+# No `setLevel` and no handler: nothing configures logging and uvicorn configures only its
+# own loggers, so records reach `logging.lastResort` (stderr, WARNING and above). The
+# warnings and exceptions below appear in `docker logs`; an INFO record would not.
 
 PDF_API_ENABLED = os.getenv("ENABLE_PDF_API", "").strip() not in ("", "0")
 
@@ -131,32 +123,14 @@ if PDF_API_ENABLED:
                 headers={"Content-Disposition": "attachment; filename=labels.pdf"},
             )
         except StarletteHTTPException:
-            # Already carries a deliberate status and a detail written for the caller;
-            # re-wrapping it as a 500 below would throw both away. Nothing inside the
-            # block raises one today — this branch keeps that true if one ever appears.
-            # Caught on the STARLETTE class rather than fastapi's: `fastapi.HTTPException`
-            # is a subclass of it, so this single `except` covers both flavours. Catching
-            # only fastapi's would let a Starlette-raised one — from a dependency, or from
-            # code that imported the base class — fall through to the generic handler
-            # below and reach the caller re-wrapped as a 500, which is precisely what this
-            # branch promises will not happen.
+            # Already carries a deliberate status and detail; do not re-wrap it as a 500.
+            # The Starlette class also covers `fastapi.HTTPException`, its subclass.
             raise
         except Exception as exc:
-            # Why this exists at all: letting the exception propagate to Starlette gets
-            # the caller a bare `Internal Server Error` with no detail (the app runs with
-            # debug off), and the caller here is the Telegram print bot, which shows the
-            # response body to a human. During the CDN blackhole incident that human saw
-            # exactly `Label Maker returned 500: Internal Server Error` while the real
-            # cause — a `Page.goto` timeout waiting for a jsPDF script that never arrived
-            # because cdnjs.cloudflare.com was unreachable — was visible only to whoever
-            # could read the container logs. So: log the full traceback for the container
-            # log, and put the exception type and message into the response so the person
-            # reading the bot's reply learns what actually broke. Capped at 500 chars
-            # because a playwright error message can carry a whole page of context — a
-            # message plus its "Call log" tail goes well past that. The cap ADDS a `...`
-            # marker, and only when it actually cut something: without it the reader of
-            # the bot's reply has no way to tell a complete error from a half sentence
-            # that merely reads like one.
+            # Without this the caller (the Telegram print bot, which shows the body to a
+            # human) gets a bare `Internal Server Error`. Log the traceback and return the
+            # exception type and message, capped at 500 chars (playwright messages carry a
+            # long call log) with a `...` marker only when something was cut.
             logger.exception("PDF render failed: %s", exc)
             detail = f"{type(exc).__name__}: {exc}"
             if len(detail) > 500:
